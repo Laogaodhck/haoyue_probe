@@ -36,6 +36,18 @@ jobs:
 
       - run: npm ci
 
+      # npm 的 install-scripts 策略可能跳过 electron 的 postinstall，
+      # 那样 electron-builder 会在打包第一步就找不到 Electron 二进制。
+      - name: 确认 Electron 二进制已下载
+        shell: bash
+        run: |
+          if [ ! -f node_modules/electron/path.txt ]; then
+            echo "postinstall 未执行，重建 electron"
+            npm rebuild electron
+          fi
+          test -f node_modules/electron/path.txt
+          node -p "'Electron ' + require('electron').version + ' -> ' + require('electron')"
+
       - name: 校验标签与 package.json 版本一致
         shell: bash
         run: |
@@ -52,7 +64,15 @@ jobs:
         run: npm test
 
       - name: 打包
-        run: npm run dist
+        shell: bash
+        run: |
+          if npm run dist > dist.log 2>&1; then
+            tail -n 6 dist.log
+          else
+            # 未登录无法取回完整日志，失败时把结尾贴到作业摘要里
+            { echo '### 打包失败（dist.log 结尾）'; echo '```'; tail -n 40 dist.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: 发布到 GitHub Release
         if: github.event_name == 'push'

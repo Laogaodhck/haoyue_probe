@@ -93,6 +93,7 @@ photo/
 ├── tools/
 │   ├── server.js           # 浏览器模式静态服务（默认 8410，可用 PORT 覆盖）
 │   ├── _lib.cjs            # 测试公共库（端口、浏览器、断言计数、照片解析）
+│   ├── check-refs.cjs      # index.html 脚本与模型引用完整性校验（npm test 首步）
 │   ├── test-*.cjs          # 纯算法 / 冒烟测试（npm test）
 │   ├── verify-hair.cjs     # 端到端：分割效果统计
 │   ├── verify-matteview.cjs# 端到端：缩放平移、笔刷擦除与撤销
@@ -167,6 +168,22 @@ npm run icons     # 重新生成图标（加 -- --out <dir> 可避免覆盖成�
   仓库不收录真人照片，请自行放置一张正面单人照。
 - Chromium：项目内 playwright 若未下载浏览器，先执行 `npx playwright install chromium`；
   也可用 `HAOYUE_CHROMIUM=<chrome.exe 路径>` 指向本机已有的浏览器。
+
+### 持续集成与发布（GitHub Actions）
+
+- **CI**（`.github/workflows/ci.yml`）：push 到 `main`、Pull Request 与手动触发时，
+  在 ubuntu 与 windows 两个 runner 上跑 `node --check` 语法扫描与 `npm test`
+  （含 `tools/check-refs.cjs` 的 index.html 脚本与模型文件引用完整性校验）。
+  测试不启动 Electron，故以 `ELECTRON_SKIP_BINARY_DOWNLOAD=1` 省掉二进制下载。
+- **发布**（`.github/workflows/release.yml`）：推送 `v*` 标签触发，在 `windows-latest` 上
+  先校验标签版本与 `package.json` 一致，再跑 `npm test` 门禁、`npm run dist` 打包，
+  把 Setup 与便携版两个 exe 上传到对应 GitHub Release；`workflow_dispatch` 手动触发时
+  只上传构建产物供试装，不建 Release。electron / electron-builder 下载目录做了缓存。
+- **发布流程**：改动合并到 `main` → 在 PR 里递增 `package.json` 的 `version` →
+  合并后 `git tag v<version> && git push origin v<version>` → Actions 自动出安装包。
+- `npm run verify` 依赖真人样片与本机 Chromium，属本地验收，不进 CI。
+- 依赖升级由 `.github/dependabot.yml` 每周一开 PR（npm 的 minor/patch 合并为一个分组，
+  GitHub Actions 工作流单独跟踪）。
 
 ## 许可与致谢
 

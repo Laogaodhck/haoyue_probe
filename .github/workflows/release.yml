@@ -1,0 +1,76 @@
+name: 发布桌面应用
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: 构建 Windows 安装包
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # electron 与 electron-builder 的下载缓存（NSIS 工具链、winCodeSign、electron zip）
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
+
+      - run: npm ci
+
+      - name: 校验标签与 package.json 版本一致
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "手动触发，不做版本校验"; exit 0
+          fi
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 package.json 版本 $version 不一致，请先在 PR 里改版本号"
+            exit 1
+          fi
+
+      - name: 测试门禁
+        run: npm test
+
+      - name: 打包
+        run: npm run dist
+
+      - name: 发布到 GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" \
+                 --title "浩玥照片工具 $GITHUB_REF_NAME" \
+                 --generate-notes --target "$GITHUB_SHA"
+          gh release upload "$GITHUB_REF_NAME" release/*.exe --clobber
+
+      # 手动触发时不建 Release，只留产物供试装
+      - name: 上传构建产物
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: haoyue-idphoto-windows
+          path: release/*.exe
+          if-no-files-found: error

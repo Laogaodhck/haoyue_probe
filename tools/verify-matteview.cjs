@@ -106,6 +106,7 @@ withServer(PORT, async () => {
       }
     }
     assert(!!P, '找到非红色采样点 ' + JSON.stringify(c1));
+    const beforeStroke = await snap();
     await page.mouse.move(P[0], P[1]);
     await page.mouse.down();
     await page.mouse.move(P[0] + 24, P[1] + 12, { steps: 6 });
@@ -119,6 +120,7 @@ withServer(PORT, async () => {
     await page.click('#btn-undo');
     await sleep(250);
     assert((await snap()) !== afterStroke, '撤销后蒙版恢复（画面变化）');
+    assert((await snap()) === beforeStroke, '撤销逐像素恢复原画面和半透明发丝');
   } finally {
     await browser.close();
   }

@@ -1,25 +1,4 @@
-/* ============================================================
- * segmenter.js — 人像分割（MediaPipe Image Segmenter，本地 WASM 推理）
- * 优先 selfie_multiclass_256x256（背景/头发/皮肤/衣服六分类，边缘更准），
- * 加载失败自动回退 selfie_segmenter（人/背景二分类）。
- *
- * 精准度增强管线（全部本地推理，断网可用）：
- *   1) 粗分割：整图一次推理，得到全图人像置信度锚点
- *   2) 高分辨率分块精修：大图切 512px 重叠瓦片逐块推理，
- *      模型内部仅把单块缩到 256 而非整图缩到 256，
- *      发丝/衣缘等细节有效分辨率成倍提升；
- *      瓦片按到边距离加权融入粗分割结果（过渡平滑无接缝）
- *   3) 分类感知增强（多分类模型的头发/衣服专属通道）：
- *      头发主导像素置信度 ×1.3、衣服主导 ×1.25（白衣服与浅背景难分，
- *      模型置信度天然偏低），配合滞后阈值逐像素下调，把发丝/白衣
- *      拉回二值化可达区间；头发区再用小半径导向滤波吸附单根发丝、
- *      中值滤波放宽为 3/9 多数票防止细丝被切
- *   4) 遮罩清理：滞后阈值二值化（无灰晕，弱阈值连通生长）→ 3×3 多数值滤波去噪点
- *      → 连通域清理（保留最大人像域 + 面积达 3% 的次级域如合影第二人）
- *      → 孔洞填充（被身体包围的背景洞全部补齐）
- * 依赖 vendor/mediapipe/vision_bundle.iife.js 暴露的 window.__mpVision
- * 输出：workCanvas（限边工作图）+ maskCanvas（白色=人像，透明=背景）
- * ============================================================ */
+/* MediaPipe 本地人像分割：多分类保护、连通域清理、轮廓 alpha 与发丝混色净化。 */
 'use strict';
 
 window.Matting = (function () {
@@ -99,40 +78,34 @@ window.Matting = (function () {
     return best;
   }
 
-  /* 置信度通道经 8bit alpha 画布重采样到目标分辨率（0..1 浮点） */
+  // 浮点插值避免细发丝置信度经 8 位画布往返量化。
   function resampleF32(src, w, h, tw, th) {
-    var tmp = document.createElement('canvas');
-    tmp.width = w; tmp.height = h;
-    var tctx = tmp.getContext('2d');
-    var timg = tctx.createImageData(w, h);
-    for (var j = 0, q = 3; j < src.length; j++, q += 4) timg.data[q] = Math.round(src[j] * 255);
-    tctx.putImageData(timg, 0, 0);
-    var dst = document.createElement('canvas');
-    dst.width = tw; dst.height = th;
-    var dctx = dst.getContext('2d');
-    dctx.imageSmoothingEnabled = true;
-    dctx.imageSmoothingQuality = 'high';
-    dctx.drawImage(tmp, 0, 0, tw, th);
-    var back = dctx.getImageData(0, 0, tw, th).data;
     var out = new Float32Array(tw * th);
-    for (var p = 0, r = 3; p < out.length; p++, r += 4) out[p] = back[r] / 255;
+    for (var y = 0; y < th; y++) {
+      var sy = Math.max(0, Math.min(h - 1, (y + 0.5) * h / th - 0.5));
+      var y0 = Math.floor(sy), y1 = Math.min(h - 1, y0 + 1), fy = sy - y0;
+      for (var x = 0; x < tw; x++) {
+        var sx = Math.max(0, Math.min(w - 1, (x + 0.5) * w / tw - 0.5));
+        var x0 = Math.floor(sx), x1 = Math.min(w - 1, x0 + 1), fx = sx - x0;
+        var top = src[y0 * w + x0] * (1 - fx) + src[y0 * w + x1] * fx;
+        var bottom = src[y1 * w + x0] * (1 - fx) + src[y1 * w + x1] * fx;
+        out[y * tw + x] = top * (1 - fy) + bottom * fy;
+      }
+    }
     return out;
   }
 
-  /* MediaPipe 结果 → 人像置信度 { conf, hair, clothes, w, h }
-   * 多分类模型（6 通道：背景/头发/身体皮肤/脸部皮肤/衣服/其他）时，
-   * 额外带出头发与衣服通道（0..1，已重采样到期望分辨率）供分类感知增强；
-   * 二分类回退模型时 hair/clothes 为 null。 */
   function extractPersonConf(result, expectW, expectH) {
     var masks = result.confidenceMasks;
     var m;
-    var hair = null, clothes = null;
+    var hair = null, clothes = null, face = null;
     if (masks.length >= 3) {
       var bg = new Float32Array(masks[0].getAsFloat32Array());
       var conf = new Float32Array(bg.length);
       for (var i = 0; i < bg.length; i++) conf[i] = 1 - bg[i];
       if (masks.length >= 6) { // 6 通道多分类：0背景 1头发 2身体皮肤 3脸部皮肤 4衣服 5其他
         hair = new Float32Array(masks[1].getAsFloat32Array());
+        face = new Float32Array(masks[3].getAsFloat32Array());
         clothes = new Float32Array(masks[4].getAsFloat32Array());
       }
       m = { conf: conf, w: masks[0].width, h: masks[0].height };
@@ -141,13 +114,13 @@ window.Matting = (function () {
       m = { conf: picked.arr, w: picked.w, h: picked.h };
     }
     if (m.w !== expectW || m.h !== expectH) {
-      // 罕见的分辨率不一致：经画布拉伸重采样到期望分辨率（8bit 精度足够）
       m.conf = resampleF32(m.conf, m.w, m.h, expectW, expectH);
       if (hair) hair = resampleF32(hair, m.w, m.h, expectW, expectH);
+      if (face) face = resampleF32(face, m.w, m.h, expectW, expectH);
       if (clothes) clothes = resampleF32(clothes, m.w, m.h, expectW, expectH);
       m.w = expectW; m.h = expectH;
     }
-    m.hair = hair; m.clothes = clothes;
+    m.hair = hair; m.clothes = clothes; m.face = face;
     return m;
   }
 
@@ -180,13 +153,19 @@ window.Matting = (function () {
     });
   }
 
+  function tileStarts(length) {
+    var starts = [0];
+    while (starts[starts.length - 1] + TILE < length) {
+      starts.push(Math.min(length - TILE, starts[starts.length - 1] + TILE - OVERLAP));
+    }
+    return starts;
+  }
+
   /* 大图分块精修：返回与工作图同尺寸的融合置信度 */
   async function tiledRefine(work, base, report) {
     var W = work.width, H = work.height;
-    var STEP = TILE - OVERLAP;
-    var xs = [], ys = [];
-    for (var x0 = 0; x0 < W; x0 += STEP) xs.push(x0);
-    for (var y0 = 0; y0 < H; y0 += STEP) ys.push(y0);
+    // 末块贴边，避免窄条瓦片丢失人像上下文后把衣服识别成背景。
+    var xs = tileStarts(W), ys = tileStarts(H);
     var total = xs.length * ys.length;
     var done = 0;
 
@@ -223,7 +202,7 @@ window.Matting = (function () {
       var s = wacc[i];
       var v;
       if (s > 0.01) {
-        var wt2 = Math.min(1, s);
+        var wt2 = Math.min(1, s) * 0.65;
         v = (acc[i] / s) * wt2 + base[i] * (1 - wt2);
       } else {
         v = base[i];
@@ -301,25 +280,29 @@ window.Matting = (function () {
      头发丝细、白衣服与浅背景难分，二者置信度天然偏低。
      在像素的专属通道占优时对其增益提升，把原本落在阈值之下的
      发丝/白衣像素拉回二值化可达区间（增益后仍须通过滞后阈值连通性检验）。 */
-  function classBoost(conf, hair, clothes) {
-    if (!hair && !clothes) return conf;
+  function classBoost(conf, hair, clothes, face) {
     for (var i = 0; i < conf.length; i++) {
       var h = hair ? hair[i] : 0;
       var c = clothes ? clothes[i] : 0;
-      if (h > 0.25) { var b1 = Math.min(1, h * 1.3); if (b1 > conf[i]) conf[i] = b1; }
-      if (c > 0.3) { var b2 = Math.min(1, c * 1.25); if (b2 > conf[i]) conf[i] = b2; }
+      var f = face ? face[i] : 0;
+      if (h > 0.25) conf[i] = Math.max(conf[i], Math.min(1, h * 1.3));
+      if (c > 0.3) conf[i] = Math.max(conf[i], Math.min(1, c * 1.25));
+      if (f > 0.4) conf[i] = Math.max(conf[i], Math.min(1, f * 1.1));
     }
     return conf;
   }
 
   /* 分类感知阈值下调量：头发/衣服主导像素的强/弱阈值都适度降低，
      与 classBoost 配合——boost 负责「拉高置信度」，gain 负责「降低门槛」 */
-  function classGain(hair, clothes) {
-    var gain = new Float32Array(hair.length);
+  function classGain(hair, clothes, face) {
+    var channel = hair || clothes || face;
+    if (!channel) return null;
+    var gain = new Float32Array(channel.length);
     for (var i = 0; i < gain.length; i++) {
       var h = hair ? hair[i] : 0;
       var c = clothes ? clothes[i] : 0;
-      gain[i] = Math.min(0.15, h * 0.10 + c * 0.15);
+      var f = face ? face[i] : 0;
+      gain[i] = Math.min(0.15, h * 0.10 + c * 0.15 + f * 0.05);
     }
     return gain;
   }
@@ -352,15 +335,21 @@ window.Matting = (function () {
       x = p % w; y = (p / w) | 0;
       if (x > 0) push(p - 1);
       if (x < w - 1) push(p + 1);
-      if (y > 0) push(p - w);
-      if (y < h - 1) push(p + w);
+      if (y > 0) {
+        push(p - w);
+        if (x > 0) push(p - w - 1);
+        if (x < w - 1) push(p - w + 1);
+      }
+      if (y < h - 1) {
+        push(p + w);
+        if (x > 0) push(p + w - 1);
+        if (x < w - 1) push(p + w + 1);
+      }
     }
     return bin; // 未被强主体连通的 weak 保持 0 → 孤立弱噪声被丢弃
   }
 
-  /* 3×3 多数值滤波：去除孤立噪点，平滑锯齿。
-     hairMask（可选）：头发主导像素放宽为 3/9 多数票——
-     5/9 多数票会把 1–2px 宽的发丝整根切掉，头发区须宽容 */
+  // 已连通的细发丝只需一个邻居，背景像素不放宽阈值以免蒙版膨胀。
   function medianFilter3(bin, w, h, hairMask) {
     var out = new Uint8Array(bin.length);
     for (var y = 0; y < h; y++) {
@@ -373,7 +362,8 @@ window.Matting = (function () {
           for (var xx = x0; xx <= x1; xx++) n += bin[row + xx];
         }
         var idx = y * w + x;
-        var need = (hairMask && hairMask[idx]) ? 3 : 5;
+        var need = (hairMask && hairMask[idx] && bin[idx]) ? 2 : 5;
+        need = Math.min(need, Math.ceil((x1 - x0 + 1) * (y1 - y0 + 1) / 2));
         out[idx] = n >= need ? 1 : 0;
       }
     }
@@ -402,6 +392,14 @@ window.Matting = (function () {
         if (px < w - 1 && bin[p + 1] === 1 && label[p + 1] === 0) { label[p + 1] = cur; stack[sp++] = p + 1; }
         if (py > 0 && bin[p - w] === 1 && label[p - w] === 0) { label[p - w] = cur; stack[sp++] = p - w; }
         if (py < h - 1 && bin[p + w] === 1 && label[p + w] === 0) { label[p + w] = cur; stack[sp++] = p + w; }
+        for (var dy = -1; dy <= 1; dy += 2) {
+          if (py + dy < 0 || py + dy >= h) continue;
+          for (var dx = -1; dx <= 1; dx += 2) {
+            if (px + dx < 0 || px + dx >= w) continue;
+            var q = p + dy * w + dx;
+            if (bin[q] === 1 && label[q] === 0) { label[q] = cur; stack[sp++] = q; }
+          }
+        }
       }
       sizes[cur] = size;
       comps.push(cur);
@@ -424,7 +422,7 @@ window.Matting = (function () {
      会在遮罩底边留下锯齿状缺口；判定人像延伸出画面后，边界过渡带内的
      背景缺口若「纵向邻近人体前景」（向上/向内 LOOK 窗口内有人像）才补为前景，
      避免把角落里真正的背景一起填掉（换红蓝底会露白角） */
-  function solidifyBorders(bin, w, h) {
+  function solidifyBorders(bin, w, h, conf) {
     var bandY = Math.max(8, Math.round(h * 0.05));
     var bandX = Math.max(8, Math.round(w * 0.05));
     var LOOK = Math.max(48, Math.round(h * 0.08)); // 纵向邻近判定窗口：覆盖更高的贴底缺口
@@ -437,7 +435,7 @@ window.Matting = (function () {
       for (var x = 0; x < w; x++) if (bin[row + x]) { if (first < 0) first = x; last = x; cnt++; }
       if (first < 0 || cnt < w * SPAN_MIN) return;
       for (var x2 = first; x2 <= last; x2++) {
-        if (bin[row + x2]) continue;
+        if (bin[row + x2] || conf[row + x2] < 0.25) continue;
         for (var k = 1; k <= LOOK; k++) {
           var yy = y + dir * k;
           if (yy < 0 || yy >= h) break;
@@ -450,7 +448,7 @@ window.Matting = (function () {
       for (var y = 0; y < h; y++) if (bin[y * w + x]) { if (first < 0) first = y; last = y; cnt++; }
       if (first < 0 || cnt < h * SPAN_MIN) return;
       for (var y2 = first; y2 <= last; y2++) {
-        if (bin[y2 * w + x]) continue;
+        if (bin[y2 * w + x] || conf[y2 * w + x] < 0.25) continue;
         // 纵向邻近判定：缺口上/下沿列方向 LOOK 窗口内有人像 → 补（边缘轮廓抖动产生的竖向缺口）
         var hit = false;
         for (var k2 = 1; k2 <= LOOK; k2++) {
@@ -481,8 +479,8 @@ window.Matting = (function () {
     if (leftHit) for (var xl = 0; xl < Math.min(bandX, w); xl++) colSpan(xl);
   }
 
-  /* 孔洞填充：从图像边界对背景洪泛，未到达的背景即身体包围的洞 → 填为前景 */
-  function fillHoles(bin, w, h) {
+  // 只修补仍有前景证据的孔洞，保留发丝间与手臂间的真实背景。
+  function fillHoles(bin, w, h, conf) {
     var N = w * h;
     var reach = new Uint8Array(N);
     var stack = new Int32Array(N);
@@ -499,20 +497,191 @@ window.Matting = (function () {
       if (py < h - 1) push(p + w);
     }
     for (var i = 0; i < N; i++) {
-      if (bin[i] === 0 && reach[i] === 0) bin[i] = 1; // 未被边界背景到达 → 内部孔洞
+      if (bin[i] === 0 && reach[i] === 0 && conf[i] >= 0.35) bin[i] = 1;
     }
   }
 
-  /* 二值遮罩 → 白色人像画布（alpha 0/255，无灰晕） */
-  function binaryToCanvas(bin, w, h) {
+  /* 轮廓透明度 + 发丝混色净化：
+     边界窄带内解 C = a·F + (1-a)·B 得到连续 alpha；发丝主导像素再把混合色
+     反解为纯前景色写回工作图，换底时发梢不会残留原背景的彩色光晕。
+     直接修改 rgba（调用方需把该 ImageData 写回工作画布）。 */
+  function refineAlpha(bin, conf, rgba, w, h, classes) {
+    var N = bin.length;
+    var radius = Math.max(3, Math.round(Math.min(w, h) * 0.01));
+    var density = boxBlur(bin, w, h, radius);
+    var edge = boxBlur(bin, w, h, 1);
+    // 5×5 前景占比：颜色方程无解的发丝外圈用它做亚像素柔边
+    var cover = boxBlur(bin, w, h, 2);
+    var hair = classes.hair, clothes = classes.clothes, face = classes.face;
+    var fg = new Float32Array(N), bg = new Float32Array(N);
+    var alpha = new Uint8Array(N);
+    var gBg = [0, 0, 0], bgCount = 0;
+    for (var i = 0; i < N; i++) {
+      alpha[i] = bin[i] ? 255 : 0;
+      fg[i] = density[i] > 0.995 && conf[i] >= 0.7 ? 1 : 0;
+      bg[i] = density[i] < 0.005 && conf[i] <= 0.15 ? 1 : 0;
+      if (hair && bg[i]) {
+        bgCount++;
+        gBg[0] += rgba[i * 4]; gBg[1] += rgba[i * 4 + 1]; gBg[2] += rgba[i * 4 + 2];
+      }
+    }
+    // 全图背景均值：局部估计不可用时的净化基准，样本太少则不启用
+    var hasGlobal = bgCount >= 512;
+    if (hasGlobal) { gBg[0] /= bgCount; gBg[1] /= bgCount; gBg[2] /= bgCount; }
+    var sampleRadius = radius * 4;
+    var fgWeight = boxBlur(fg, w, h, sampleRadius);
+    var bgWeight = boxBlur(bg, w, h, sampleRadius);
+    var dot = new Float32Array(N), norm = new Float32Array(N), distance = new Float32Array(N);
+    var fgColor = new Float32Array(N), bgColor = new Float32Array(N);
+    var bMap = hair ? new Uint8Array(N * 3) : null;   // 逐像素局部背景色（0..255）
+    for (var channel = 0; channel < 3; channel++) {
+      for (var j = 0; j < N; j++) {
+        var value = rgba[j * 4 + channel] / 255;
+        fgColor[j] = value * fg[j];
+        bgColor[j] = value * bg[j];
+      }
+      var meanF = boxBlur(fgColor, w, h, sampleRadius);
+      var meanB = boxBlur(bgColor, w, h, sampleRadius);
+      for (var k = 0; k < N; k++) {
+        if (fgWeight[k] < 0.001 || bgWeight[k] < 0.001) continue;
+        var b = meanB[k] / bgWeight[k];
+        if (bMap) bMap[k * 3 + channel] = bgWeight[k] >= 0.02
+          ? Math.max(0, Math.min(255, Math.round(b * 255))) : 0;
+        var delta = meanF[k] / fgWeight[k] - b;
+        var observed = rgba[k * 4 + channel] / 255 - b;
+        dot[k] += observed * delta;
+        norm[k] += delta * delta;
+        distance[k] += observed * observed;
+      }
+    }
+    // F = C + k·(C − B)，k=(1−a)/a；上限避免把噪声放大成色斑
+    function purify(p, a, b0, b1, b2, limit) {
+      var k = Math.min(limit, (1 - a) / Math.max(a, 1e-3));
+      if (k <= 0.01) return;
+      var o = p * 4;
+      rgba[o] += k * (rgba[o] - b0);
+      rgba[o + 1] += k * (rgba[o + 1] - b1);
+      rgba[o + 2] += k * (rgba[o + 2] - b2);
+    }
+    for (var p = 0; p < N; p++) {
+      if (density[p] <= 0.005 || density[p] >= 0.995) continue;
+      var hp = hair ? hair[p] : 0;
+      var strand = hp > 0.15 && hp > Math.max(clothes ? clothes[p] : 0, face ? face[p] : 0);
+      // 皮肤和花纹衣物不能用宽带颜色混合推断透明度，否则浅色纹理会被挖空。
+      if (!strand) {
+        if (edge[p] <= 0 || edge[p] >= 1) continue;
+        if (bin[p] && conf[p] >= 0.85) continue;
+      }
+      var a = -1;
+      if ((bin[p] || conf[p] >= 0.02) && fgWeight[p] >= 0.001 &&
+          bgWeight[p] >= 0.001 && norm[p] >= 0.01) {
+        var est = Math.max(0, Math.min(1, dot[p] / norm[p]));
+        var residual = distance[p] - 2 * est * dot[p] + est * est * norm[p];
+        if (residual <= 0.03) a = Math.max(0, Math.min(1, (est - 0.03) / 0.94));
+      }
+      if (a >= 0) {
+        if (strand && a >= 0.12) {
+          var o = p * 3;
+          purify(p, a, bMap[o], bMap[o + 1], bMap[o + 2], 1.5);
+        }
+      } else if (strand && bin[p] && hasGlobal && cover[p] < 0.999) {
+        // 前背景同色等无解情形：发丝仍按覆盖率柔边，并按全局背景色做保守净化
+        a = Math.max(0, Math.min(1, (cover[p] - 0.30) / 0.62));
+        purify(p, Math.max(a, 0.35), gBg[0], gBg[1], gBg[2], 0.4);
+      } else {
+        continue;   // 证据不足时保留语义轮廓的原值
+      }
+      alpha[p] = Math.round(a * 255);
+    }
+    return alpha;
+  }
+
+  /* 发丝间隙透出原底色：判据是「离背景色比离发色近得多」且该处与画面外背景连通
+     ——只有这样的窄通道才是发丝间真正透出的墙，而不是发丝高光或孤立亮斑。
+     再加语义护栏：模型判为衣服/脸部、人像证据强或处在头发包围区之外的一律不动。 */
+  function clearHairGaps(alpha, bin, conf, rgba, classes, w, h) {
+    var N = w * h;
+    var hair = classes.hair, clothes = classes.clothes, face = classes.face;
+    if (!hair) return 0;
+    var isHair = new Uint8Array(N);
+    var hR = 0, hG = 0, hB = 0, hn = 0;
+    for (var i = 0; i < N; i++) {
+      var hv = hair[i];
+      if (hv <= 0.3 || hv <= Math.max(clothes ? clothes[i] : 0, face ? face[i] : 0)) continue;
+      isHair[i] = 1;
+      if (bin[i] && conf[i] >= 0.8) {
+        var o = i * 4;
+        hR += rgba[o]; hG += rgba[o + 1]; hB += rgba[o + 2]; hn++;
+      }
+    }
+    if (hn < 256) return 0;                     // 没有可靠发色参照 → 无从判定
+    hR /= hn; hG /= hn; hB /= hn;
+    var rr = Math.max(6, Math.round(Math.min(w, h) * 0.02));
+    var trust = new Float32Array(N), cr = new Float32Array(N), cg = new Float32Array(N), cb = new Float32Array(N);
+    var n = 0, bR = 0, bG = 0, bB = 0;
+    for (var s = 0; s < N; s++) {
+      if (bin[s] || conf[s] > 0.15) continue;   // 蒙版外且模型也不认为是人像 → 真背景样本
+      var so = s * 4;
+      trust[s] = 1; cr[s] = rgba[so]; cg[s] = rgba[so + 1]; cb[s] = rgba[so + 2]; n++;
+      bR += rgba[so]; bG += rgba[so + 1]; bB += rgba[so + 2];
+    }
+    if (n < 512) return 0;
+    bR /= n; bG /= n; bB /= n;
+    // 局部背景色场：墙面有明暗渐变时不能用全图均值当参照
+    var wt = boxBlur(trust, w, h, rr);
+    var lr = boxBlur(cr, w, h, rr), lg = boxBlur(cg, w, h, rr), lb = boxBlur(cb, w, h, rr);
+    trust = cr = cg = cb = null;
+    var near = new Uint8Array(N);
+    for (var p = 0; p < N; p++) {
+      var q = p * 4;
+      // 头发内部深处的缺口取不到局部样本，退回全图均值：仍有连通性和语义护栏兜底
+      var iw = wt[p] >= 0.05 ? 1 / wt[p] : 0;
+      var rBg = iw ? lr[p] * iw : bR, gBg = iw ? lg[p] * iw : bG, bBg = iw ? lb[p] * iw : bB;
+      var dBg = Math.abs(rgba[q] - rBg) + Math.abs(rgba[q + 1] - gBg) + Math.abs(rgba[q + 2] - bBg);
+      var dHair = Math.abs(rgba[q] - hR) + Math.abs(rgba[q + 1] - hG) + Math.abs(rgba[q + 2] - hB);
+      near[p] = dBg < dHair * 0.5 ? 1 : 0;
+    }
+    wt = lr = lg = lb = null;
+    // 只有被头发包围的间隙才处理，避免吃穿浅色衣领与脸部高光
+    var r = Math.max(4, rr);
+    var hairDens = boxBlur(isHair, w, h, r);
+    var reach = new Uint8Array(N), stack = new Int32Array(N), sp = 0;
+    function push(p) { if (near[p] && !reach[p]) { reach[p] = 1; stack[sp++] = p; } }
+    for (var x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+    for (var y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+    while (sp > 0) {
+      var c = stack[--sp];
+      var cx = c % w, cy = (c / w) | 0;
+      if (cx > 0) push(c - 1);
+      if (cx < w - 1) push(c + 1);
+      if (cy > 0) push(c - w);
+      if (cy < h - 1) push(c + w);
+    }
+    var punch = [];
+    function eligible(k2) {
+      if (alpha[k2] === 0 || !near[k2] || !bin[k2]) return false;
+      if (!reach[k2]) return false;                             // 孤立亮斑：不动
+      if (conf[k2] >= 0.6) return false;                        // 人像证据强：不动
+      if (hairDens[k2] < 0.12) return false;                    // 不在头发包围区内：不动
+      if (clothes && clothes[k2] > hair[k2]) return false;      // 模型判为衣服：那是浅色衣领不是间隙
+      if (face && face[k2] > hair[k2]) return false;
+      return true;
+    }
+    for (var k2 = 0; k2 < N; k2++) if (eligible(k2)) punch.push(k2);
+    if (punch.length > N * 0.02) return 0;   // 大面积同色说明判定不可靠，整体放弃
+    for (var i2 = 0; i2 < punch.length; i2++) alpha[punch[i2]] = 0;
+    return punch.length;
+  }
+
+  function alphaToCanvas(alpha, w, h) {
     var canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     var ctx = canvas.getContext('2d');
     var img = ctx.createImageData(w, h);
     var d = img.data;
-    for (var i = 0, j = 0; i < bin.length; i++, j += 4) {
+    for (var i = 0, j = 0; i < alpha.length; i++, j += 4) {
       d[j] = 255; d[j + 1] = 255; d[j + 2] = 255;
-      d[j + 3] = bin[i] ? 255 : 0;
+      d[j + 3] = alpha[i];
     }
     ctx.putImageData(img, 0, 0);
     return canvas;
@@ -549,7 +718,8 @@ window.Matting = (function () {
     await yieldUI();
     var W = work.width, H = work.height;
     var wctx = work.getContext('2d', { willReadFrequently: true });
-    var wd = wctx.getImageData(0, 0, W, H).data;
+    var wimg = wctx.getImageData(0, 0, W, H);
+    var wd = wimg.data;
     var lum = new Float32Array(W * H);
     for (var li = 0, lj = 0; li < lum.length; li++, lj += 4) {
       lum[li] = (0.299 * wd[lj] + 0.587 * wd[lj + 1] + 0.114 * wd[lj + 2]) / 255;
@@ -563,7 +733,7 @@ window.Matting = (function () {
 
     // 3.5) 头发细节导向滤波：头发主导区用小半径低 eps 二次精修，
     //      把遮罩边缘吸附到单根发丝级轮廓（大半径 pass 负责整体边缘）
-    var hair = coarse.hair, clothes = coarse.clothes;
+    var hair = coarse.hair, clothes = coarse.clothes, face = coarse.face;
     if (hair) {
       var gSmall = guidedFilter(conf, lum, W, H, 4, 1.5e-4);
       for (var hi = 0; hi < conf.length; hi++) {
@@ -572,12 +742,12 @@ window.Matting = (function () {
     }
 
     // 3.6) 分类感知增强：头发/白衣服专属通道增益 + 阈值下调（须在二值化之前）
-    classBoost(conf, hair, clothes);
+    classBoost(conf, hair, clothes, face);
 
     // 4) 二值化（滞后阈值：强 0.5 / 弱 0.35，头发/衣服主导区阈值适度下调）
     report('遮罩去噪与精修…');
     await yieldUI();
-    var gain = (hair || clothes) ? classGain(hair, clothes) : null;
+    var gain = classGain(hair, clothes, face);
     var bin = hysteresisBin(conf, W, H, 0.5, 0.35, gain);
     var hairMask = null;
     if (hair) {
@@ -585,16 +755,23 @@ window.Matting = (function () {
       for (var hm = 0; hm < hairMask.length; hm++) hairMask[hm] = hair[hm] > 0.3 ? 1 : 0;
     }
     bin = medianFilter3(bin, W, H, hairMask);
-    solidifyBorders(bin, W, H);  // 先补实贴边缺口，避免身体碎块被连通域清理误删
+    solidifyBorders(bin, W, H, conf);
     bin = cleanComponents(bin, W, H);
-    fillHoles(bin, W, H);
+    fillHoles(bin, W, H, conf);
+    report('AI 发丝与人像轮廓透明度精修…');
+    await yieldUI();
+    var alpha = refineAlpha(bin, conf, wd, W, H, coarse);
+    if (coarse.hair) {
+      clearHairGaps(alpha, bin, conf, wd, coarse, W, H);   // 发丝间隙透出新的底色
+      wctx.putImageData(wimg, 0, 0);                       // 发丝混色净化写回工作图
+    }
 
-    return { workCanvas: work, maskCanvas: binaryToCanvas(bin, W, H) };
+    return { workCanvas: work, maskCanvas: alphaToCanvas(alpha, W, H) };
   }
 
   return {
     init: init, segment: segment, isReady: isReady,
     /* 内部纯算法函数，供 Node 冒烟测试（不依赖 DOM） */
-    _test: { axisWeight: axisWeight, medianFilter3: medianFilter3, cleanComponents: cleanComponents, fillHoles: fillHoles, solidifyBorders: solidifyBorders, boxBlur: boxBlur, guidedFilter: guidedFilter, hysteresisBin: hysteresisBin, classBoost: classBoost, classGain: classGain }
+    _test: { axisWeight: axisWeight, tileStarts: tileStarts, resampleF32: resampleF32, extractPersonConf: extractPersonConf, refineAlpha: refineAlpha, clearHairGaps: clearHairGaps, medianFilter3: medianFilter3, cleanComponents: cleanComponents, fillHoles: fillHoles, solidifyBorders: solidifyBorders, boxBlur: boxBlur, guidedFilter: guidedFilter, hysteresisBin: hysteresisBin, classBoost: classBoost, classGain: classGain }
   };
 })();

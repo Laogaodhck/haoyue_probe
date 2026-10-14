@@ -33,7 +33,7 @@ window.Composer = (function () {
     ctx.fillStyle = st.bg || '#FFFFFF';
     ctx.fillRect(0, 0, outW, outH);
 
-    // 2. 遮罩（alpha 通道，无羽化，锐利边缘）
+    // 2. 遮罩（保留发丝的连续 alpha）
     var a = ensureSize(_tmpA, outW, outH);
     _tmpA = a;
     var actx = a.getContext('2d');

@@ -1,6 +1,13 @@
-/* 验证下载产物中的 DPI 元数据与尺寸 */
+/* ============================================================
+ * verify-output.cjs — 检查 PNG 产物的尺寸与 pHYs（DPI）元数据
+ * 用法：node tools/verify-output.cjs [a.png b.png ...]
+ *       不带参数时检查 .playwright-cli/ 下 E2E 下载的默认产物
+ * ============================================================ */
 'use strict';
 const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.join(__dirname, '..');
 
 function phys(buf) {
   let pos = 8;
@@ -14,16 +21,26 @@ function phys(buf) {
   return null;
 }
 
-const s = fs.readFileSync(__dirname + '/../.playwright-cli/out-single.png');
-const dpi = phys(s);
-console.log('single:', s.length, 'bytes;',
-  'size:', s.readUInt32BE(16) + 'x' + s.readUInt32BE(20),
-  '; pHYs:', JSON.stringify(dpi),
-  '=> DPI:', dpi ? Math.round(dpi.x * 0.0254) : 'NONE');
+const files = process.argv.slice(2).length
+  ? process.argv.slice(2)
+  : ['.playwright-cli/out-single.png', '.playwright-cli/out-sheet.png'].map(p => path.join(ROOT, p));
 
-const sh = fs.readFileSync(__dirname + '/../.playwright-cli/out-sheet.png');
-const dpi2 = phys(sh);
-console.log('sheet:', sh.length, 'bytes;',
-  'size:', sh.readUInt32BE(16) + 'x' + sh.readUInt32BE(20),
-  '; pHYs:', JSON.stringify(dpi2),
-  '=> DPI:', dpi2 ? Math.round(dpi2.x * 0.0254) : 'NONE');
+let fail = 0;
+for (const f of files) {
+  let buf;
+  try {
+    buf = fs.readFileSync(f);
+  } catch (e) {
+    console.error('跳过（读不到文件）:', f);
+    fail++;
+    continue;
+  }
+  const dpi = phys(buf);
+  const name = path.basename(f);
+  console.log(name + ':', buf.length, 'bytes;',
+    'size:', buf.readUInt32BE(16) + 'x' + buf.readUInt32BE(20),
+    '; pHYs:', JSON.stringify(dpi),
+    '=> DPI:', dpi && dpi.u === 1 ? Math.round(dpi.x * 0.0254) : 'NONE');
+  if (!dpi || dpi.u !== 1) fail++;
+}
+process.exit(fail ? 1 : 0);

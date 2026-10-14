@@ -1,26 +1,34 @@
-/* 生成 Electron/NSIS 所需图标：多尺寸 PNG + 多尺寸 ICO（PNG 条目） */
+/* ============================================================
+ * make-icons.cjs — 生成 Electron/NSIS 所需图标：多尺寸 PNG + 多尺寸 ICO（PNG 条目）
+ * 用法：npm run icons [-- --out <目录>]
+ * ============================================================ */
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const Jimp = require(path.join(
-  'C:', 'Users', 'laogao', '.workbuddy', 'binaries', 'node', 'workspace', 'node_modules', 'jimp'
-));
+const { Jimp, JimpMime, ResizeStrategy } = require('jimp');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'assets', 'src-icon.png');
 const SIZES = [256, 128, 64, 48, 32, 24, 16];
 
+function outDir() {
+  const i = process.argv.indexOf('--out');
+  return i > -1 && process.argv[i + 1] ? path.resolve(process.argv[i + 1]) : path.join(ROOT, 'assets');
+}
+
 (async () => {
+  const dir = outDir();
+  fs.mkdirSync(dir, { recursive: true });
   const src = await Jimp.read(SRC);
-  console.log('源图:', src.bitmap.width + 'x' + src.bitmap.height);
+  console.log('源图:', src.bitmap.width + 'x' + src.bitmap.height, '→ 输出', dir);
 
   const pngs = [];
   for (const size of SIZES) {
-    const img = src.clone().resize(size, size, Jimp.RESIZE_BICUBIC);
-    const buf = await img.getBufferAsync(Jimp.MIME_PNG);
+    const img = src.clone().resize({ w: size, h: size, strategy: ResizeStrategy.BICUBIC });
+    const buf = await img.getBuffer(JimpMime.png);
     pngs.push({ size, buf });
     if (size === 256) {
-      fs.writeFileSync(path.join(ROOT, 'assets', 'icon.png'), buf);
+      fs.writeFileSync(path.join(dir, 'icon.png'), buf);
     }
   }
 
@@ -48,6 +56,6 @@ const SIZES = [256, 128, 64, 48, 32, 24, 16];
     p.buf.copy(ico, dataOff);
     dataOff += p.buf.length;
   }
-  fs.writeFileSync(path.join(ROOT, 'assets', 'icon.ico'), ico);
+  fs.writeFileSync(path.join(dir, 'icon.ico'), ico);
   console.log('icon.ico:', totalSize, 'bytes,', count, '个尺寸; icon.png 256px 已生成');
 })().catch(e => { console.error(e); process.exit(1); });

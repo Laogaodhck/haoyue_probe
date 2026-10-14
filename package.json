@@ -8,15 +8,18 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "serve": "node tools/server.js",
     "dist": "electron-builder --win",
-    "icons": "node tools/make-icons.cjs"
+    "icons": "node tools/make-icons.cjs",
+    "test": "node tools/test-dpi.cjs && node tools/test-hair-clothes.cjs && node tools/test-server.cjs && node tools/test-dom.cjs",
+    "verify": "node tools/verify-hair.cjs && node tools/verify-matteview.cjs && node tools/verify-sheet.cjs"
   },
   "build": {
     "appId": "com.haoyue.idphoto",
     "productName": "浩玥照片工具",
     "copyright": "老高 · QQ 846193",
     "directories": {
-      "output": "E:/electron-dist/haoyue-idphoto",
+      "output": "release",
       "buildResources": "assets"
     },
     "files": [
@@ -64,6 +67,9 @@
   },
   "devDependencies": {
     "electron": "^33.4.11",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "jimp": "^1.6.1",
+    "jsdom": "^30.1.2",
+    "playwright": "^1.64.1"
   }
 }

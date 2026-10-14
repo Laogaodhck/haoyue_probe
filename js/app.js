@@ -1,9 +1,10 @@
 /* ============================================================
- * app.js — 主控：上传 → 抠图换底 → 规格调整 → 导出
+ * app.js — 核心状态 + 照片流程：上传 → 抠图换底 → 规格调整 → 导出
+ * 排版流程见 sheet.js，直接打印见 print.js，设置持久化见 settings.js。
  * ============================================================ */
 'use strict';
 
-(function () {
+window.App = (function () {
 
   /* ================= 全局状态 ================= */
   var State = {
@@ -11,7 +12,7 @@
     sourceName: '',         // 原始文件名（去扩展名），用于导出命名
     workCanvas: null,
     maskCanvas: null,
-    initialMaskData: null,
+    initialMask: null,      // 自动抠图初始蒙版（Brush.snapMask 快照）
     bg: '#FFFFFF',
     brushMode: 'restore',   // restore=修补 erase=擦除
     brushSize: 30,          // 显示像素（按比例换算工作图坐标）
@@ -107,7 +108,7 @@
       State.workCanvas = r.workCanvas;
       State.maskCanvas = r.maskCanvas;
       State.undoStack = [];
-      State.initialMaskData = window.Brush.snapMask(State);
+      State.initialMask = window.Brush.snapMask(State);
       State.bg = '#FFFFFF';
       State.matteView = { zoom: 1, panX: 0, panY: 0 }; // 新照片重置视图
       if (matteViewApi) matteViewApi.fit();
@@ -199,20 +200,27 @@
     });
   }
 
-  function pushUndo() {
-    State.undoStack.push(window.Brush.snapMask(State));
-    if (State.undoStack.length > 12) State.undoStack.shift();
+  /* 撤销快照只存单通道蒙版 alpha（1 字节/像素，蒙版本身只有白+alpha），
+     并按像素总量限制层数：RGBA ImageData 每层 4 字节，1600×1600 下 12 层要吃 120MB */
+  var UNDO_BUDGET = 16 * 1024 * 1024;
+
+  function pushUndo(snap) {
+    State.undoStack.push(snap || window.Brush.snapMask(State));
+    var px = State.maskCanvas.width * State.maskCanvas.height;
+    var max = Math.max(3, Math.min(12, Math.floor(UNDO_BUDGET / px)));
+    while (State.undoStack.length > max) State.undoStack.shift();
   }
 
   function undoMask() {
     var snap = State.undoStack.pop();
     if (!snap) { toast('没有可撤销的操作'); return; }
-    State.maskCanvas.getContext('2d').putImageData(snap, 0, 0);
+    window.Brush.restoreMask(State, snap);
     renderMatteView();
   }
 
   function resetMask() {
-    State.maskCanvas.getContext('2d').putImageData(State.initialMaskData, 0, 0);
+    if (!State.initialMask) return;
+    window.Brush.restoreMask(State, State.initialMask);
     State.undoStack = [];
     renderMatteView();
   }
@@ -287,14 +295,14 @@
         State.bg = s.dataset.color;
         syncBgSwatches();
         renderMatteView();
-        saveSettings();
+        window.App.settings.save();
       });
     });
     $('custom-bg').addEventListener('input', function () {
       State.bg = this.value;
       document.querySelectorAll('.swatch').forEach(function (x) { x.classList.remove('active'); });
       renderMatteView();
-      saveSettings();
+      window.App.settings.save();
     });
 
     $('btn-to-spec').addEventListener('click', function () { showStep('spec'); });
@@ -354,7 +362,7 @@
           c.classList.toggle('active', c.dataset.id === sp.id);
         });
         applySpec();
-        saveSettings();
+        window.App.settings.save();
       });
       grid.appendChild(card);
     });
@@ -458,7 +466,7 @@
       c.height = State.outH;
     }
     c.getContext('2d').drawImage($('crop-view'), 0, 0);
-    if (refreshExportPrinters) refreshExportPrinters(); // 刷新打印机列表
+    window.App.print.refreshExportList(); // 刷新打印机列表
 
     var sp = State.spec;
     var layout = window.Composer.bestLayout(sp.pxW, sp.pxH);
@@ -532,19 +540,19 @@
       r.addEventListener('change', function () {
         State.fmt = this.value;
         $('quality-row').hidden = State.fmt !== 'jpeg';
-        saveSettings();
+        window.App.settings.save();
       });
     });
     $('quality').addEventListener('input', function () {
       State.quality = (+this.value) / 100; // toBlob 需要 0–1 小数
       $('quality-val').textContent = this.value + '%';
-      saveSettings();
+      window.App.settings.save();
     });
     $('btn-download-single').addEventListener('click', exportSingle);
     $('btn-download-sheet').addEventListener('click', exportSheet);
 
     // 直接打印：照片导出模块（打印单张成品）
-    refreshExportPrinters = setupPrintPanel('print-export', function () {
+    window.App.print.setupPanel('print-export', function () {
       if (!State.workCanvas || !State.transform) throw new Error('请先完成一张照片');
       return [makeSingleCanvas().toDataURL('image/png')];
     });
@@ -559,7 +567,7 @@
     });
   }
 
-  /* ================= 模块切换（照片 / 排版） ================= */
+  /* ================= 模块切换（首页 / 照片 / 排版） ================= */
   function showModule(name) {
     document.body.dataset.module = name;
     $('view-home').style.display = name === 'home' ? '' : 'none';
@@ -568,500 +576,15 @@
     document.querySelectorAll('.module-tab').forEach(function (t) {
       t.classList.toggle('active', t.dataset.module === name);
     });
-    if (name === 'sheet') showSheetStep('tpl'); // 每次进入排版模块回到第 1 步
+    if (name === 'sheet') window.App.sheet.showStep('tpl'); // 每次进入排版模块回到第 1 步
   }
 
-  /* 排版模块分步：tpl → import → preview → print */
-  var SHEET_STEPS = ['tpl', 'import', 'preview', 'print'];
-  function showSheetStep(name) {
-    SHEET_STEPS.forEach(function (s, idx) {
-      var panel = $('sheetstep-' + s);
-      if (panel) panel.classList.toggle('active', s === name);
-      var chip = document.querySelector('.step[data-sstep="' + s + '"]');
-      if (chip) {
-        chip.classList.toggle('active', s === name);
-        chip.classList.toggle('done', idx < SHEET_STEPS.indexOf(name));
-      }
-    });
-    if (name === 'preview') renderLaySheet();
-    if (name === 'print') { drawPrintPreview(); refreshSheetPrinterList(); }
-  }
-
-  /* ================= 排版模块 ================= */
-  var sheetFiles = [];       // 批量导入的照片 [{canvas, name}]
-  var sheetPages = null;     // 最近一次排版结果 { pages, ... }
-  var sheetPageIdx = 0;
-
-  /* 源图 cover 绘制到所选规格尺寸 */
-  function coverToSpec(src, sp) {
-    var cell = document.createElement('canvas');
-    cell.width = sp.pxW; cell.height = sp.pxH;
-    var ctx = cell.getContext('2d');
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, cell.width, cell.height);
-    var k = Math.max(cell.width / src.width, cell.height / src.height);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(src, (cell.width - src.width * k) / 2, (cell.height - src.height * k) / 2, src.width * k, src.height * k);
-    return cell;
-  }
-
-  /* 组装逐格照片列表：每张导入照片 × 所选份数，统一尺寸 */
-  function collectSheetCells() {
-    var tip = $('sheet-empty-tip');
-    var sp = window.SpecUtil.byId($('sheet-spec').value);
-    if (!sheetFiles.length) {
-      tip.hidden = false;
-      tip.textContent = '请先批量导入照片（可多选），或点击「使用照片模块的成品」';
-      return null;
-    }
-    tip.hidden = true;
-    var copies = +$('sheet-count').value;
-    var cells = [];
-    sheetFiles.forEach(function (f) {
-      var cell = coverToSpec(f.canvas, sp);
-      for (var i = 0; i < copies; i++) cells.push(cell);
-    });
-    return { cells: cells, sp: sp };
-  }
-
-  function renderLaySheet() {
-    var tip = $('sheet-empty-tip');
-    var canvas = $('laysheet-preview');
-    var info = $('sheet-info');
-    var pageRow = $('sheet-page-row');
-
-    var input = collectSheetCells();
-    if (!input) {
-      sheetPages = null;
-      canvas.width = 600; canvas.height = 400;
-      var blank = canvas.getContext('2d');
-      blank.fillStyle = '#1a1d24';
-      blank.fillRect(0, 0, 600, 400);
-      info.textContent = '';
-      pageRow.hidden = true;
-      return;
-    }
-
-    var result = window.Composer.layoutBatch(input.cells, $('sheet-paper').value, {
-      gap: +$('sheet-gap').value,
-      cutLines: $('sheet-cutlines').checked
-    });
-    if (!result) { info.textContent = '该尺寸无法排入所选相纸'; return; }
-    sheetPages = result;
-    if (sheetPageIdx >= result.pages.length) sheetPageIdx = 0;
-
-    // 页码下拉
-    var pageSel = $('sheet-page');
-    pageSel.innerHTML = '';
-    for (var i = 0; i < result.pages.length; i++) {
-      var opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent = '第 ' + (i + 1) + ' 页 / 共 ' + result.pages.length + ' 页（' + result.pages[i].count + ' 张）';
-      pageSel.appendChild(opt);
-    }
-    pageSel.value = sheetPageIdx;
-    pageRow.hidden = result.pages.length <= 1;
-
-    drawSheetPage();
-    var copies = +$('sheet-count').value;
-    info.textContent = result.paper.name + ' · ' + result.width + '×' + result.height + 'px · 300DPI · 共 '
-      + sheetFiles.length + ' 张照片 × ' + copies + ' 份 = ' + result.total + ' 格 · 版面 ' + result.cols + ' 列×'
-      + Math.min(result.pages[0].rowsUsed, Math.round(result.capacity / result.cols)) + ' 行'
-      + (result.pages.length > 1 ? ' · 分 ' + result.pages.length + ' 页' : '');
-  }
-
-  function drawSheetPage() {
-    if (!sheetPages) return;
-    var canvas = $('laysheet-preview');
-    var page = sheetPages.pages[sheetPageIdx];
-    var k2 = Math.min(1, 900 / sheetPages.width);
-    canvas.width = Math.round(sheetPages.width * k2);
-    canvas.height = Math.round(sheetPages.height * k2);
-    canvas.getContext('2d').drawImage(page.canvas, 0, 0, canvas.width, canvas.height);
-  }
-
-  async function downloadLaySheet() {
-    if (!sheetPages) {
-      // 尚未预览过则现算
-      renderLaySheet();
-      if (!sheetPages) { toast('请先批量导入照片', true); return; }
-    }
-    var name = sheetFiles.length ? (sheetFiles[0].name || '照片') : (State.sourceName || '照片');
-    var multi = sheetPages.pages.length > 1;
-    try {
-      for (var i = 0; i < sheetPages.pages.length; i++) {
-        var blob = await new Promise(function (r) { sheetPages.pages[i].canvas.toBlob(r, 'image/png'); });
-        var buf = window.DpiUtil.setPngDpi(await blob.arrayBuffer(), 300);
-        var fname = name + '_排版_' + sheetPages.paper.name
-          + (multi ? '_第' + (i + 1) + '页共' + sheetPages.pages.length + '页' : '_' + sheetPages.pages[i].count + '张')
-          + '.png';
-        download(new Blob([buf], { type: 'image/png' }), fname);
-        if (multi) await new Promise(function (r) { setTimeout(r, 350); }); // 间隔避免下载拦截
-      }
-      toast('排版图已保存（' + sheetPages.total + ' 张 · ' + sheetPages.pages.length + ' 版 · 300DPI）');
-    } catch (e) {
-      console.error(e);
-      toast('导出失败：' + e.message, true);
-    }
-  }
-
-  function initSheet() {
-    // 规格下拉
-    var sel = $('sheet-spec');
-    window.SPECS.forEach(function (sp) {
-      var opt = document.createElement('option');
-      opt.value = sp.id;
-      opt.textContent = sp.name + ' · ' + sp.desc + ' · ' + sp.pxW + '×' + sp.pxH;
-      if (sp.id === State.spec.id) opt.selected = true;
-      sel.appendChild(opt);
-    });
-
-    // 模块 Tab
+  function initModules() {
     document.querySelectorAll('.module-tab').forEach(function (t) {
       t.addEventListener('click', function () { showModule(t.dataset.module); });
     });
-
-    // 首页菜单卡片
     $('home-photo').addEventListener('click', function () { showModule('photo'); });
     $('home-sheet').addEventListener('click', function () { showModule('sheet'); });
-
-    $('btn-sheet-file').addEventListener('click', function () { $('sheet-file-input').click(); });
-    $('sheet-file-input').addEventListener('change', function () {
-      var files = Array.prototype.slice.call(this.files || []).filter(function (f) { return /^image\//.test(f.type); });
-      this.value = '';
-      if (!files.length) return;
-      var loaded = [];
-      var pending = files.length;
-      files.forEach(function (file) {
-        var reader = new FileReader();
-        reader.onload = function () {
-          var img = new Image();
-          img.onload = function () {
-            var c = document.createElement('canvas');
-            c.width = img.naturalWidth; c.height = img.naturalHeight;
-            c.getContext('2d').drawImage(img, 0, 0);
-            loaded.push({ canvas: c, name: (file.name || '').replace(/\.[^.]+$/, '') || '照片' });
-            if (--pending === 0) {
-              sheetFiles = sheetFiles.concat(loaded); // 累加导入
-              $('sheet-file-name').textContent = '已导入 ' + sheetFiles.length + ' 张：'
-                + sheetFiles.slice(-loaded.length).map(function (f) { return f.name; }).join('、');
-              renderLaySheet();
-            }
-          };
-          img.onerror = function () { if (--pending === 0) renderLaySheet(); };
-          img.src = reader.result;
-        };
-        reader.readAsDataURL(file);
-      });
-    });
-
-    // 使用照片模块成品（追加为一张导入照片）
-    $('btn-use-photo-result').addEventListener('click', function () {
-      if (!State.workCanvas || !State.transform) { toast('请先在「照片」模块完成一张成品', true); return; }
-      var c = makeSingleCanvas();
-      sheetFiles.push({ canvas: c, name: State.sourceName || '照片成品' });
-      $('sheet-file-name').textContent = '已导入 ' + sheetFiles.length + ' 张（含照片模块成品 1 张）';
-      renderLaySheet();
-    });
-
-    $('sheet-spec').addEventListener('change', renderLaySheet);
-    $('sheet-count').addEventListener('change', renderLaySheet);
-    $('sheet-paper').addEventListener('change', renderLaySheet);
-    $('sheet-cutlines').addEventListener('change', renderLaySheet);
-    $('sheet-page').addEventListener('change', function () {
-      sheetPageIdx = +this.value;
-      drawSheetPage();
-    });
-    $('sheet-gap').addEventListener('input', function () {
-      $('sheet-gap-val').textContent = this.value + 'px';
-      renderLaySheet();
-    });
-    $('btn-download-laysheet').addEventListener('click', downloadLaySheet);
-
-    // 排版分步导航
-    $('btn-sheet-back-photo').addEventListener('click', function () { showModule('photo'); });
-    $('btn-sheet-to-import').addEventListener('click', function () { showSheetStep('import'); });
-    $('btn-sheet-back-tpl').addEventListener('click', function () { showSheetStep('tpl'); });
-    $('btn-sheet-to-preview').addEventListener('click', function () {
-      if (!sheetFiles.length) { toast('请先导入照片', true); return; }
-      showSheetStep('preview');
-    });
-    $('btn-sheet-back-import').addEventListener('click', function () { showSheetStep('import'); });
-    $('btn-sheet-clear').addEventListener('click', function () {
-      if (!sheetFiles.length) { toast('当前没有已导入的照片'); return; }
-      sheetFiles = [];
-      $('sheet-file-name').textContent = '已清空';
-      toast('已清空导入的照片');
-    });
-
-    // 第 4 步：打印预览（选打印机 → 设参数 → 打印）
-    $('btn-sheet-goto-print').addEventListener('click', function () {
-      if (!sheetPages) renderLaySheet();
-      if (!sheetPages) { toast('请先在第二步导入照片', true); return; }
-      showSheetStep('print');
-    });
-    $('btn-sheet-back-preview').addEventListener('click', function () { showSheetStep('preview'); });
-    $('print-sheet-refresh').addEventListener('click', function () { refreshSheetPrinterList(); });
-    $('print-sheet-props').addEventListener('click', openSheetPrinterProps);
-    $('print-sheet-copies').addEventListener('change', function () {
-      // 数字输入钳制到 1–99
-      var v = Math.floor(+this.value);
-      if (!v || v < 1) v = 1;
-      if (v > 99) v = 99;
-      this.value = v;
-    });
-    ['print-paper', 'print-landscape', 'print-margin'].forEach(function (id) {
-      $(id).addEventListener('change', function () { drawPrintPreview(); });
-    });
-    $('print-sheet-btn').addEventListener('click', printLaySheets);
-  }
-
-  /* ================= 直接打印（Electron IPC） ================= */
-  var printApi = window.haoyuePrint || null;
-  var refreshExportPrinters = null;  // 照片导出模块打印机列表刷新器
-
-  /* prefix: 'export'；getJobs 返回 dataURL 数组（每页一张图） */
-  function setupPrintPanel(prefix, getJobs) {
-    var panel = $(prefix + '-panel');
-    var unsup = $(prefix + '-unsupported');
-    if (!printApi || !panel) {
-      if (panel) panel.hidden = true;
-      if (unsup) unsup.hidden = false;
-      return null;
-    }
-    var sel = $(prefix + '-printer');
-
-    async function refreshPrinters() {
-      try {
-        var printers = await printApi.listPrinters();
-        sel.innerHTML = '';
-        printers.forEach(function (p) {
-          var opt = document.createElement('option');
-          opt.value = p.name;
-          opt.textContent = (p.isDefault ? '★ ' : '') + p.displayName + (p.status ? '（' + p.status + '）' : '');
-          if (p.isDefault) opt.selected = true;
-          sel.appendChild(opt);
-        });
-        sel.disabled = printers.length === 0;
-        $(prefix + '-status').textContent = printers.length ? '' : '未检测到打印机，请检查系统打印设备';
-      } catch (e) {
-        $(prefix + '-status').textContent = '读取打印机失败：' + e.message;
-      }
-    }
-    refreshPrinters();
-
-    $(prefix + '-copies').addEventListener('change', function () {
-      // 数字输入钳制到 1–99
-      var v = Math.floor(+this.value);
-      if (!v || v < 1) v = 1;
-      if (v > 99) v = 99;
-      this.value = v;
-    });
-
-    $(prefix + '-btn').addEventListener('click', async function () {
-      var jobs;
-      try { jobs = getJobs(); } catch (e) { jobs = []; }
-      if (!jobs || !jobs.length) { toast('没有可打印的内容', true); return; }
-      var btn = this;
-      btn.disabled = true;
-      var status = $(prefix + '-status');
-      status.textContent = '正在发送打印任务…';
-      var fail = null;
-      try {
-        for (var i = 0; i < jobs.length; i++) {
-          var res = await printApi.printImage({
-            dataUrl: jobs[i],
-            printerName: sel.value || undefined,
-            copies: +($(prefix + '-copies').value) || 1
-          });
-          if (!res.ok) { fail = res.error; break; }
-        }
-      } catch (e) {
-        fail = e.message;
-      }
-      btn.disabled = false;
-      if (fail) {
-        status.textContent = '打印失败：' + fail;
-        toast('打印失败：' + fail, true);
-      } else {
-        status.textContent = '已发送打印任务 ✓（' + jobs.length + ' 页）';
-        toast('已发送到打印机 ✓');
-      }
-    });
-
-    return refreshPrinters;
-  }
-
-  /* ================= 排版第 4 步：打印预览与执行 ================= */
-  /* 物理纸张（mm）；4x6 走 Electron 自定义尺寸（微米） */
-  var PRINT_PAPERS = {
-    'A4':     { w: 210,   h: 297,   electron: 'A4' },
-    'B5':     { w: 182,   h: 257,   electron: { width: 182000, height: 257000 } },  /* 微米自定义尺寸 */
-    'A5':     { w: 148,   h: 210,   electron: 'A5' },
-    'A3':     { w: 297,   h: 420,   electron: 'A3' },
-    'Letter': { w: 215.9, h: 279.4, electron: 'Letter' },
-    '4x6':    { w: 101.6, h: 152.4, electron: { width: 101600, height: 152400 } }
-  };
-
-  /* 纸张模拟预览：白纸 + 按边距 contain 适配当前排版页 */
-  function drawPrintPreview() {
-    var canvas = $('print-preview-canvas');
-    if (!canvas) return;
-    var ctx = canvas.getContext('2d');
-    if (!sheetPages) { renderLaySheet(); }
-    if (!sheetPages) {
-      canvas.width = 600; canvas.height = 400;
-      ctx.fillStyle = '#1a1d24'; ctx.fillRect(0, 0, 600, 400);
-      return;
-    }
-    var pk = PRINT_PAPERS[$('print-paper').value] || PRINT_PAPERS.A4;
-    var landscape = $('print-landscape').value === '1';
-    var pw = landscape ? pk.h : pk.w;
-    var ph = landscape ? pk.w : pk.h;
-    var marginMm = $('print-margin').value === 'printableArea' ? 5 : 0;
-
-    var k = Math.min(700 / pw, 760 / ph);
-    canvas.width = Math.round(pw * k);
-    canvas.height = Math.round(ph * k);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    var page = sheetPages.pages[sheetPageIdx] ? sheetPages.pages[sheetPageIdx].canvas : sheetPages.pages[0].canvas;
-    var m = marginMm * k;
-    var fit = Math.min((canvas.width - 2 * m) / page.width, (canvas.height - 2 * m) / page.height);
-    var dw = page.width * fit, dh = page.height * fit;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(page, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
-
-    if (m > 0) { // 可打印区域示意线
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(m, m, canvas.width - 2 * m, canvas.height - 2 * m);
-      ctx.setLineDash([]);
-    }
-  }
-
-  /* 排版打印面板：刷新打印机列表（桌面版） */
-  async function refreshSheetPrinterList() {
-    var sel = $('print-sheet-printer');
-    var unsup = $('print-sheet-unsupported');
-    var status = $('print-sheet-status');
-    var btn = $('print-sheet-btn');
-    if (!printApi) {
-      if (unsup) unsup.hidden = false;
-      if (btn) btn.disabled = true;
-      var propsBtn = $('print-sheet-props');
-      if (propsBtn) propsBtn.disabled = true;
-      return;
-    }
-    if (unsup) unsup.hidden = true;
-    try {
-      var printers = await printApi.listPrinters();
-      sel.innerHTML = '';
-      printers.forEach(function (p) {
-        var opt = document.createElement('option');
-        opt.value = p.name;
-        opt.textContent = (p.isDefault ? '★ ' : '') + p.displayName + (p.status ? '（' + p.status + '）' : '');
-        if (p.isDefault) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      sel.disabled = printers.length === 0;
-      status.textContent = printers.length ? '' : '未检测到打印机，请检查系统打印设备';
-      if (btn) btn.disabled = printers.length === 0;
-      var propsBtn = $('print-sheet-props');
-      if (propsBtn) propsBtn.disabled = printers.length === 0;
-    } catch (e) {
-      status.textContent = '读取打印机失败：' + e.message;
-    }
-  }
-
-  /* 打开所选打印机的系统属性对话框（桌面版） */
-  async function openSheetPrinterProps() {
-    var status = $('print-sheet-status');
-    if (!printApi || !printApi.showPrinterProperties) {
-      toast('浏览器模式不支持打印机属性，请使用桌面版', true);
-      return;
-    }
-    var name = $('print-sheet-printer').value;
-    if (!name) { toast('请先选择打印机', true); return; }
-    if (status) status.textContent = '正在打开打印机属性…';
-    try {
-      var res = await printApi.showPrinterProperties(name);
-      if (status) status.textContent = res && res.ok ? '' : (res.error || '无法打开打印机属性');
-      if (!res || !res.ok) toast(res.error || '无法打开打印机属性', true);
-    } catch (e) {
-      if (status) status.textContent = '打开打印机属性失败：' + e.message;
-    }
-  }
-
-  /* 执行打印：逐页发送，携带纸张/方向/边距/份数 */
-  async function printLaySheets() {
-    if (!sheetPages) { renderLaySheet(); }
-    if (!sheetPages) { toast('没有可打印的排版，请先导入照片', true); return; }
-    if (!printApi) { toast('浏览器模式不支持直接打印，请使用桌面版', true); return; }
-    var btn = $('print-sheet-btn');
-    var status = $('print-sheet-status');
-    var pk = PRINT_PAPERS[$('print-paper').value] || PRINT_PAPERS.A4;
-    var params = {
-      printerName: $('print-sheet-printer').value || undefined,
-      copies: +$('print-sheet-copies').value || 1,
-      pageSize: pk.electron,
-      landscape: $('print-landscape').value === '1',
-      marginType: $('print-margin').value === 'printableArea' ? 'printableArea' : 'none'
-    };
-    btn.disabled = true;
-    status.textContent = '正在发送打印任务…';
-    var fail = null;
-    try {
-      for (var i = 0; i < sheetPages.pages.length; i++) {
-        var res = await printApi.printImage(Object.assign({
-          dataUrl: sheetPages.pages[i].canvas.toDataURL('image/png')
-        }, params));
-        if (!res.ok) { fail = res.error; break; }
-      }
-    } catch (e) {
-      fail = e.message;
-    }
-    btn.disabled = false;
-    if (fail) {
-      status.textContent = '打印失败：' + fail;
-      toast('打印失败：' + fail, true);
-    } else {
-      status.textContent = '已发送打印任务 ✓（' + sheetPages.pages.length + ' 页 × ' + params.copies + ' 份）';
-      toast('已发送到打印机 ✓');
-    }
-  }
-
-  /* ================= 设置持久化（localStorage） ================= */
-  var SETTINGS_KEY = 'haoyue-idphoto-settings';
-  function saveSettings() {
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-        spec: State.spec.id, bg: State.bg, fmt: State.fmt, quality: State.quality
-      }));
-    } catch (e) { /* 存储不可用时静默忽略 */ }
-  }
-  function loadSettings() {
-    try {
-      var s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
-      if (!s) return;
-      if (s.spec) State.spec = window.SpecUtil.byId(s.spec);
-      if (s.bg) State.bg = s.bg;
-      if (s.fmt === 'png' || s.fmt === 'jpeg') State.fmt = s.fmt;
-      if (typeof s.quality === 'number') State.quality = Math.min(1, Math.max(0.5, s.quality));
-    } catch (e) { }
-  }
-  function applySettingsToUI() {
-    document.querySelectorAll('input[name="fmt"]').forEach(function (r) {
-      r.checked = r.value === State.fmt;
-    });
-    $('quality-row').hidden = State.fmt !== 'jpeg';
-    $('quality').value = Math.round(State.quality * 100);
-    $('quality-val').textContent = Math.round(State.quality * 100) + '%';
-    $('custom-bg').value = /^#[0-9a-fA-F]{6}$/.test(State.bg) ? State.bg : '#FFFFFF';
-    syncBgSwatches();
   }
 
   /* ================= 启动 ================= */
@@ -1085,19 +608,36 @@
       warn.hidden = false;
       warn.textContent = '⚠️ 当前以 file:// 方式打开，AI 模型无法加载。请双击 start.bat（或用任意静态服务器）打开本工具。';
     }
-    loadSettings(); // 恢复上次的规格/背景/输出设置（须在 buildSpecGrid 之前）
+    window.App.settings.load();   // 恢复上次的规格/背景/输出设置（须在 buildSpecGrid 之前）
+    initModules();
     initUpload();
     initMatte();
     initSpec();
     initExport();
-    initSheet();
-    applySettingsToUI();
+    window.App.sheet.init();
+    window.App.print.init();
+    window.App.settings.applyToUI();
     showModule('home'); // 启动进入首页
   }
+
+  var App = {
+    State: State,
+    showModule: showModule,
+    ui: {
+      $: $, toast: toast, showLoading: showLoading, hideLoading: hideLoading, download: download
+    },
+    photo: {
+      showStep: showStep,
+      syncBgSwatches: syncBgSwatches,
+      makeSingleCanvas: makeSingleCanvas
+    }
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else {
     boot();
   }
+
+  return App;
 })();

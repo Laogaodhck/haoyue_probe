@@ -8,9 +8,24 @@
 
 window.Brush = (function () {
 
+  /* 蒙版只用到 alpha 通道（白色=人像、透明=背景），快照仅存单通道，体积为 ImageData 的 1/4。 */
   function snapMask(st) {
-    var ctx = st.maskCanvas.getContext('2d');
-    return ctx.getImageData(0, 0, st.maskCanvas.width, st.maskCanvas.height);
+    var w = st.maskCanvas.width, h = st.maskCanvas.height;
+    var d = st.maskCanvas.getContext('2d').getImageData(0, 0, w, h).data;
+    var alpha = new Uint8Array(w * h);
+    for (var i = 0, p = 3; p < d.length; i++, p += 4) alpha[i] = d[p];
+    return { w: w, h: h, alpha: alpha };
+  }
+
+  function restoreMask(st, snap) {
+    if (!snap) return;
+    var w = snap.w, h = snap.h;
+    var img = st.maskCanvas.getContext('2d').createImageData(w, h);
+    var d = img.data;
+    for (var i = 0, p = 0; i < snap.alpha.length; i++, p += 4) {
+      d[p] = 255; d[p + 1] = 255; d[p + 2] = 255; d[p + 3] = snap.alpha[i];
+    }
+    st.maskCanvas.getContext('2d').putImageData(img, 0, 0);
   }
 
   function attach(canvas, st, hooks) {
@@ -109,5 +124,5 @@ window.Brush = (function () {
     canvas.addEventListener('pointercancel', stop);
   }
 
-  return { attach: attach, snapMask: snapMask };
+  return { attach: attach, snapMask: snapMask, restoreMask: restoreMask };
 })();

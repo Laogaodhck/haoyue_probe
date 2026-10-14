@@ -53,8 +53,17 @@ withServer(PORT, async () => {
   assert(typeof win.Matting.segment === 'function', 'Matting 就绪');
   assert(typeof win.Composer.compositeInto === 'function', 'Composer 就绪');
   assert(typeof win.Brush.attach === 'function', 'Brush 就绪');
+  assert(typeof win.Brush.restoreMask === 'function', 'Brush.restoreMask 就绪（撤销用单通道快照）');
   assert(typeof win.MatteView.attach === 'function', 'MatteView 就绪');
   assert(typeof win.Cropper.attach === 'function', 'Cropper 就绪');
+  assert(win.App && typeof win.App.showModule === 'function', 'App 核心状态就绪');
+  ['ui', 'photo', 'sheet', 'print', 'settings'].forEach(function (m) {
+    assert(!!win.App && typeof win.App[m] === 'object', 'App.' + m + ' 命名空间已注册');
+  });
+  assert(typeof win.App.sheet.init === 'function' && typeof win.App.print.init === 'function',
+    'App.sheet / App.print 引导函数就绪');
+  assert(typeof win.App.settings.save === 'function' && typeof win.App.photo.makeSingleCanvas === 'function',
+    'App.settings.save / App.photo.makeSingleCanvas 可用');
   assert(!!doc.getElementById('dropzone'), '上传区存在');
   assert(!!doc.getElementById('matte-view'), '抠图画布存在');
   assert(!!doc.getElementById('mv-zoom-in') && !!doc.getElementById('mv-zoom-out') && !!doc.getElementById('mv-zoom-fit'), '缩放工具栏存在');

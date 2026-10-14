@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>浩玥照片工具 · 老高 QQ 846193</title>
+<link rel="icon" href="assets/icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img class="brand-logo" src="assets/icon.png" alt="">
+    <span class="brand-name">浩玥照片工具</span>
+    <span class="badge">离线版</span>
+    <span class="credit">老高 · QQ 846193</span>
+  </div>
+  <nav class="modules">
+    <button class="module-tab active" data-module="home">首页</button>
+    <button class="module-tab" data-module="photo">照片</button>
+    <button class="module-tab" data-module="sheet">排版</button>
+  </nav>
+  <nav class="steps" id="steps-nav">
+    <div class="step active" data-step="upload"><i>1</i>上传照片</div>
+    <div class="step" data-step="matte"><i>2</i>抠图换底</div>
+    <div class="step" data-step="spec"><i>3</i>规格调整</div>
+    <div class="step" data-step="export"><i>4</i>导出</div>
+  </nav>
+  <nav class="steps" id="sheet-steps-nav">
+    <div class="step active" data-sstep="tpl"><i>1</i>选择模板</div>
+    <div class="step" data-sstep="import"><i>2</i>导入照片</div>
+    <div class="step" data-sstep="preview"><i>3</i>预览导出</div>
+    <div class="step" data-sstep="print"><i>4</i>打印</div>
+  </nav>
+</header>
+
+<div id="offline-warning" class="warn-banner" hidden></div>
+
+<main>
+
+<!-- ========== 首页 ========== -->
+<div id="view-home" class="home-view">
+  <aside class="home-declare">
+    <img class="home-logo" src="assets/icon.png" alt="浩玥照片工具">
+    <h2 class="home-name">浩玥照片工具</h2>
+    <div class="home-version">桌面离线版 v1.0.0</div>
+    <div class="home-divider"></div>
+    <h3 class="home-h3">软件声明</h3>
+    <ul class="home-declare-list">
+      <li>本软件为纯本地离线工具，所有照片均在本机处理，<b>不上传、不收集任何数据</b>。</li>
+      <li>AI 抠图基于本地 laog 模型推理，断网状态可完整使用全部功能。</li>
+      <li>本软件免费使用，仅供个人及学习用途，请勿用于非法用途。</li>
+      <li>软件按"现状"提供，作者不对因使用本软件产生的任何损失负责。</li>
+      <li>如有问题或建议，欢迎联系作者。</li>
+    </ul>
+    <div class="home-sign">老高 · QQ 846193</div>
+  </aside>
+  <div class="home-menu">
+    <button class="home-card" id="home-photo" type="button">
+      <span class="hc-icon">📷</span>
+      <span class="hc-body">
+        <span class="hc-title">照片工具</span>
+        <span class="hc-desc">AI 人像抠图换底 · 一寸 / 二寸 / 护照 / 签证 8 种规格 · 300DPI 导出打印</span>
+      </span>
+      <span class="hc-arrow">→</span>
+    </button>
+    <button class="home-card" id="home-sheet" type="button">
+      <span class="hc-icon">🗂️</span>
+      <span class="hc-body">
+        <span class="hc-title">排版工具</span>
+        <span class="hc-desc">批量导入照片 · 六寸 / A4 相纸排版 · 裁切线 · 打印预览与直接打印</span>
+      </span>
+      <span class="hc-arrow">→</span>
+    </button>
+  </div>
+</div>
+
+<div id="view-photo">
+  <!-- ========== 步骤 1：上传 ========== -->
+  <section id="step-upload" class="step-panel active">
+    <div id="dropzone" class="dropzone" role="button" tabindex="0">
+      <div class="dz-icon">📷</div>
+      <div class="dz-title">点击选择照片 / 拖拽到此处 / 粘贴截图</div>
+      <div class="dz-hint">支持 JPG、PNG · 照片将全程在本机处理，不会上传任何服务器</div>
+    </div>
+    <input type="file" id="file-input" accept="image/*" hidden>
+
+    <div class="feature-grid">
+      <div class="feature"><b>AI 人像分割</b><span>本地 WASM 推理，一键抠图</span></div>
+      <div class="feature"><b>标准规格</b><span>一寸 / 二寸 / 护照 / 签证等 8 种</span></div>
+      <div class="feature"><b>手动修补</b><span>笔刷修复发丝与边缘细节</span></div>
+      <div class="feature"><b>打印就绪</b><span>300DPI 元数据 + 六寸排版</span></div>
+    </div>
+  </section>
+
+  <!-- ========== 步骤 2：抠图换底 ========== -->
+  <section id="step-matte" class="step-panel">
+    <aside class="panel">
+      <h3>抠图笔刷</h3>
+      <div id="tool-group" class="seg-group">
+        <button data-mode="restore" class="active">修补（恢复人像）</button>
+        <button data-mode="erase">擦除（清除背景）</button>
+      </div>
+      <div class="field">
+        <label>笔刷大小 <span id="brush-size-val">30px</span></label>
+        <input type="range" id="brush-size" min="4" max="120" value="30">
+      </div>
+      <div class="btn-row">
+        <button id="btn-undo" class="ghost">↩ 撤销</button>
+        <button id="btn-reset-mask" class="ghost">重置蒙版</button>
+        <button id="btn-resegment" class="ghost">重新抠图</button>
+      </div>
+
+      <h3>背景颜色</h3>
+      <div class="swatches">
+        <button class="swatch active" data-color="#FFFFFF" style="background:#FFFFFF" title="白底"></button>
+        <button class="swatch" data-color="#FF0000" style="background:#FF0000" title="红底"></button>
+        <button class="swatch" data-color="#438EDB" style="background:#438EDB" title="蓝底"></button>
+        <button class="swatch" data-color="#2080FF" style="background:#2080FF" title="亮蓝底"></button>
+        <button class="swatch" data-color="#003399" style="background:#003399" title="深蓝底"></button>
+        <button class="swatch" data-color="#B8B8B8" style="background:#B8B8B8" title="灰底"></button>
+        <input type="color" id="custom-bg" value="#FFFFFF" title="自定义颜色">
+      </div>
+
+      <div class="btn-row bottom">
+        <button id="btn-back-upload" class="ghost">← 重新上传</button>
+        <button id="btn-to-spec" class="primary">下一步：规格调整 →</button>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div class="canvas-wrap matte-wrap">
+        <div class="zoom-bar">
+          <button id="mv-zoom-out" type="button" title="缩小">−</button>
+          <span id="mv-zoom-label">100%</span>
+          <button id="mv-zoom-in" type="button" title="放大">＋</button>
+          <button id="mv-zoom-fit" type="button" title="重置视图">适应</button>
+        </div>
+        <canvas id="matte-view"></canvas>
+        <div class="stage-tip">滚轮/双指缩放画面 · 空格或中键拖动平移 · 涂抹修补边缘（白色笔刷=恢复人像，擦除=清除背景）</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 步骤 3：规格调整 ========== -->
+  <section id="step-spec" class="step-panel">
+    <aside class="panel">
+      <h3>证件规格</h3>
+      <div id="spec-grid" class="spec-grid"></div>
+      <div id="spec-info" class="spec-info"></div>
+
+      <div class="field">
+        <label>缩放</label>
+        <input type="range" id="zoom" min="100" max="500" value="100">
+      </div>
+      <div class="btn-row">
+        <button id="btn-refit" class="ghost">⌖ 重置布局</button>
+      </div>
+
+      <div class="btn-row bottom">
+        <button id="btn-back-matte" class="ghost">← 返回换底</button>
+        <button id="btn-to-export" class="primary">下一步：导出 →</button>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div class="canvas-wrap crop-wrap">
+        <div class="crop-stack">
+          <canvas id="crop-view"></canvas>
+          <canvas id="crop-guides"></canvas>
+        </div>
+        <div class="stage-tip">拖动平移 · 滚轮/双指缩放 · 对齐参考线使头顶接近红线、眼睛接近蓝线</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 步骤 4：导出 ========== -->
+  <section id="step-export" class="step-panel">
+    <aside class="panel">
+      <h3>成品预览</h3>
+      <div id="export-info" class="spec-info"></div>
+
+      <h3>输出设置</h3>
+      <div class="radio-row">
+        <label><input type="radio" name="fmt" value="png" checked> PNG（无损）</label>
+        <label><input type="radio" name="fmt" value="jpeg"> JPEG（较小）</label>
+      </div>
+      <div class="field" id="quality-row" hidden>
+        <label>JPEG 质量 <span id="quality-val">92%</span></label>
+        <input type="range" id="quality" min="50" max="100" value="92">
+      </div>
+
+      <div class="btn-col">
+        <button id="btn-download-single" class="primary">⬇ 下载单张成品照</button>
+        <button id="btn-download-sheet" class="secondary">⬇ 下载六寸相纸排版</button>
+      </div>
+
+      <h3>直接打印</h3>
+      <div id="print-export-panel" hidden>
+        <select id="print-export-printer" class="select"></select>
+        <div class="field">
+          <label>打印份数</label>
+          <input type="number" id="print-export-copies" class="num-input" min="1" max="99" value="1">
+        </div>
+        <div class="btn-col">
+          <button id="print-export-btn" class="secondary">🖨 直接打印成品照</button>
+        </div>
+        <div id="print-export-status" class="hint-text"></div>
+      </div>
+      <div id="print-export-unsupported" class="hint-text" hidden>浏览器模式不支持直接打印，请使用桌面版（安装版 / start.bat）</div>
+
+      <div class="btn-row bottom">
+        <button id="btn-back-spec" class="ghost">← 返回调整</button>
+        <button id="btn-restart" class="ghost">处理新的照片</button>
+      </div>
+    </aside>
+
+    <div class="stage export-stage">
+      <div class="canvas-wrap preview-wrap">
+        <div class="preview-title">单张成品</div>
+        <canvas id="export-preview"></canvas>
+      </div>
+      <div class="canvas-wrap sheet-wrap">
+        <div class="preview-title">六寸相纸排版预览（含裁切线）</div>
+        <canvas id="sheet-preview"></canvas>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ========== 排版模块（分步流程） ========== -->
+<section id="view-sheet" class="step-panel">
+
+  <!-- 排版步骤 1：选择模板 -->
+  <div id="sheetstep-tpl" class="step-panel active">
+    <aside class="panel">
+      <h3>单张尺寸（模板）</h3>
+      <select id="sheet-spec" class="select"></select>
+
+      <h3>每张份数</h3>
+      <select id="sheet-count" class="select">
+        <option value="1">每张 1 份</option>
+        <option value="2">每张 2 份</option>
+        <option value="3">每张 3 份</option>
+        <option value="4">每张 4 份</option>
+      </select>
+
+      <h3>相纸</h3>
+      <select id="sheet-paper" class="select">
+        <option value="a4" selected>A4 竖版 · 2480×3508px</option>
+        <option value="b5">B5 竖版 · 2149×3035px</option>
+        <option value="a5">A5 竖版 · 1748×2480px</option>
+        <option value="a3">A3 竖版 · 3508×4961px</option>
+        <option value="6inch">六寸横版 · 1800×1200px</option>
+      </select>
+      <div class="hint-text">六寸整版约 10 张（一寸），A4 整版约 49 张（一寸）；照片超出一版时自动分页</div>
+
+      <div class="field">
+        <label>间距 <span id="sheet-gap-val">12px</span></label>
+        <input type="range" id="sheet-gap" min="0" max="40" value="12">
+      </div>
+      <label class="check-row"><input type="checkbox" id="sheet-cutlines" checked> 显示裁切线</label>
+
+      <div class="btn-row bottom">
+        <button id="btn-sheet-back-photo" class="ghost">← 返回照片模块</button>
+        <button id="btn-sheet-to-import" class="primary">下一步：导入照片 →</button>
+      </div>
+    </aside>
+    <div class="stage">
+      <div class="canvas-wrap" style="justify-content:center;align-items:center;text-align:center;">
+        <div class="dz-title" style="font-size:16px">第 1 步：选择排版模板</div>
+        <div class="dz-hint">确定单张尺寸、每张份数与相纸后，进入下一步导入照片</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 排版步骤 2：导入照片 -->
+  <div id="sheetstep-import" class="step-panel">
+    <aside class="panel">
+      <h3>批量导入照片</h3>
+      <div class="btn-col">
+        <button id="btn-sheet-file" class="primary">选择照片文件…（可多选）</button>
+        <button id="btn-use-photo-result" class="ghost">使用「照片」模块的成品</button>
+        <input type="file" id="sheet-file-input" accept="image/*" multiple hidden>
+      </div>
+      <div id="sheet-file-name" class="hint-text"></div>
+
+      <div class="btn-row">
+        <button id="btn-sheet-clear" class="ghost">清空已导入</button>
+      </div>
+
+      <div class="btn-row bottom">
+        <button id="btn-sheet-back-tpl" class="ghost">← 上一步</button>
+        <button id="btn-sheet-to-preview" class="primary">下一步：预览打印 →</button>
+      </div>
+    </aside>
+    <div class="stage">
+      <div class="canvas-wrap" style="justify-content:center;align-items:center;text-align:center;">
+        <div class="dz-title" style="font-size:16px">第 2 步：批量导入照片</div>
+        <div class="dz-hint">照片将按导入顺序逐格排入版面，可多次导入累加</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 排版步骤 3：预览打印 -->
+  <div id="sheetstep-preview" class="step-panel">
+    <aside class="panel">
+      <h3>排版结果</h3>
+      <div id="sheet-info" class="spec-info"></div>
+      <div class="field" id="sheet-page-row" hidden>
+        <label>预览页码</label>
+        <select id="sheet-page" class="select"></select>
+      </div>
+
+      <h3>导出与打印</h3>
+      <div class="btn-col">
+        <button id="btn-download-laysheet" class="primary">⬇ 下载排版图</button>
+        <button id="btn-sheet-goto-print" class="secondary">🖨 打印…</button>
+      </div>
+
+      <div class="btn-row bottom">
+        <button id="btn-sheet-back-import" class="ghost">← 上一步</button>
+      </div>
+    </aside>
+    <div class="stage export-stage">
+      <div class="canvas-wrap sheet-wrap full">
+        <div class="preview-title">排版预览（300DPI）</div>
+        <canvas id="laysheet-preview"></canvas>
+        <div id="sheet-empty-tip" class="stage-tip">请先在第二步导入照片</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 排版步骤 4：打印 -->
+  <div id="sheetstep-print" class="step-panel">
+    <aside class="panel">
+      <h3>打印机</h3>
+      <div class="field">
+        <label>选择打印机</label>
+        <select id="print-sheet-printer" class="select"></select>
+      </div>
+      <div class="btn-row">
+        <button id="print-sheet-refresh" class="ghost">↻ 刷新打印机</button>
+        <button id="print-sheet-props" class="ghost">打印机属性…</button>
+      </div>
+      <div id="print-sheet-unsupported" class="hint-text" hidden>浏览器模式不支持直接打印，请使用桌面版（安装版 / start.bat）</div>
+
+      <h3>打印参数</h3>
+      <div class="field">
+        <label>纸张大小</label>
+        <select id="print-paper" class="select">
+          <option value="A4" selected>A4</option>
+          <option value="B5">B5</option>
+          <option value="A5">A5</option>
+          <option value="A3">A3</option>
+          <option value="Letter">Letter</option>
+          <option value="4x6">4×6 英寸（六寸相纸）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>打印方向</label>
+        <select id="print-landscape" class="select">
+          <option value="0" selected>纵向</option>
+          <option value="1">横向</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>页边距</label>
+        <select id="print-margin" class="select">
+          <option value="none" selected>无边距</option>
+          <option value="printableArea">可打印区域</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>打印份数</label>
+        <input type="number" id="print-sheet-copies" class="num-input" min="1" max="99" value="1">
+      </div>
+
+      <div class="btn-col">
+        <button id="print-sheet-btn" class="primary">🖨 开始打印</button>
+      </div>
+      <div id="print-sheet-status" class="hint-text"></div>
+
+      <div class="btn-row bottom">
+        <button id="btn-sheet-back-preview" class="ghost">← 上一步</button>
+      </div>
+    </aside>
+    <div class="stage export-stage">
+      <div class="canvas-wrap sheet-wrap full">
+        <div class="preview-title">打印预览</div>
+        <canvas id="print-preview-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+</main>
+
+<!-- 加载遮罩 -->
+<div id="loading" class="loading" hidden>
+  <div class="spinner"></div>
+  <span>处理中…</span>
+</div>
+
+<!-- 轻提示 -->
+<div id="toast" class="toast"></div>
+
+<script src="vendor/mediapipe/vision_bundle.iife.js"></script>
+<script src="js/specs.js"></script>
+<script src="js/dpi.js"></script>
+<script src="js/segmenter.js"></script>
+<script src="js/composer.js"></script>
+<script src="js/brush.js"></script>
+<script src="js/matteview.js"></script>
+<script src="js/cropper.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

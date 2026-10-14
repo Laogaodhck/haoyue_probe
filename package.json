@@ -1,0 +1,69 @@
+{
+  "name": "haoyue-idphoto",
+  "productName": "浩玥照片工具",
+  "version": "1.0.0",
+  "description": "浩玥照片工具 - 纯本地离线证件照制作工具（AI 人像分割 / 换底 / 排版打印）",
+  "main": "electron/main.js",
+  "author": "laogao <846193@qq.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "icons": "node tools/make-icons.cjs"
+  },
+  "build": {
+    "appId": "com.haoyue.idphoto",
+    "productName": "浩玥照片工具",
+    "copyright": "老高 · QQ 846193",
+    "directories": {
+      "output": "E:/electron-dist/haoyue-idphoto",
+      "buildResources": "assets"
+    },
+    "files": [
+      "index.html",
+      "css/**",
+      "js/**",
+      "vendor/**",
+      "assets/icon.png",
+      "assets/icon.ico",
+      "electron/**",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "浩玥照片工具",
+      "uninstallDisplayName": "浩玥照片工具",
+      "artifactName": "浩玥照片工具 Setup ${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "浩玥照片工具_便携版.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  }
+}

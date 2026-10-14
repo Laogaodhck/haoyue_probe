@@ -1,0 +1,171 @@
+/* ============================================================
+ * main.js — 浩玥照片工具 Electron 主进程
+ * 全部资源本地化：内置静态服务 + 本地窗口，断网完整可用。
+ * ============================================================ */
+'use strict';
+
+const { app, BrowserWindow, Menu, shell, session, ipcMain } = require('electron');
+const path = require('path');
+const { createStaticServer } = require('./static-server');
+
+const APP_TITLE = '浩玥照片工具';
+let mainWindow = null;
+
+/* ---------- 打印 IPC：读取本地打印机 + 静默打印图片 ---------- */
+function registerPrintIpc() {
+  ipcMain.handle('print:listPrinters', async () => {
+    const printers = await mainWindow.webContents.getPrintersAsync();
+    return printers.map((p) => ({
+      name: p.name,
+      displayName: p.displayName || p.name,
+      isDefault: !!p.isDefault,
+      status: p.status || ''
+    }));
+  });
+
+  /* 打开所选打印机的系统属性对话框（Windows: printui.dll） */
+  ipcMain.handle('print:showProperties', async (e, printerName) => {
+    if (!printerName || typeof printerName !== 'string') {
+      return { ok: false, error: '未选择打印机' };
+    }
+    if (process.platform !== 'win32') {
+      return { ok: false, error: '当前系统不支持打印机属性对话框' };
+    }
+    const { execFile } = require('child_process');
+    return new Promise((resolve) => {
+      // rundll32 printui.dll,PrintUIEntry /p /n "打印机名" → 打印机属性
+      execFile('rundll32', ['printui.dll,PrintUIEntry', '/p', '/n', printerName], (err) => {
+        if (err) resolve({ ok: false, error: '无法打开打印机属性：' + (err.message || '未知错误') });
+        else resolve({ ok: true });
+      });
+    });
+  });
+
+  ipcMain.handle('print:printImage', async (e, payload) => {
+    const { dataUrl, printerName, copies, pageSize, landscape, marginType } = payload || {};
+    if (!dataUrl || typeof dataUrl !== 'string' || dataUrl.indexOf('data:image/') !== 0) {
+      return { ok: false, error: '无效的图片数据' };
+    }
+    // 隐藏窗口装载图片，按所选纸张/方向/边距静默发送到指定打印机
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+      + '@page{margin:0}html,body{margin:0;padding:0;background:#fff}'
+      + 'img{display:block;width:100%;height:auto}'
+      + '</style></head><body><img src="' + dataUrl + '"></body></html>';
+    const printWin = new BrowserWindow({
+      show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
+    });
+    try {
+      await printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+      const opts = {
+        silent: true,
+        printBackground: true,
+        deviceName: printerName || undefined,
+        copies: Math.max(1, Math.min(99, copies || 1)),
+        margins: { marginType: marginType === 'printableArea' ? 'printableArea' : 'none' }
+      };
+      if (pageSize) opts.pageSize = pageSize;          // 'A4'/'A5'/'Letter' 或 {width,height} 微米
+      if (landscape) opts.landscape = true;
+      return await new Promise((resolve) => {
+        printWin.webContents.print(opts, (ok, failureReason) => {
+          printWin.destroy();
+          resolve({ ok: !!ok, error: ok ? '' : (failureReason || '打印失败') });
+        });
+      });
+    } catch (err) {
+      printWin.destroy();
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  });
+}
+registerPrintIpc();
+
+// 照片工具以 Canvas 2D 为主，禁用硬件加速换取稳定性（弱 GPU 机器防崩）
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+// 部分 GPU 驱动异常的机器上 GPU 进程仍可能崩溃（GPU process isn't usable），
+// 强制进程内软件合成，彻底绕开 GPU 进程
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('in-process-gpu');
+
+// 单实例
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+async function createWindow() {
+  const root = app.getAppPath(); // 打包后指向 app.asar
+  const { port, close } = await createStaticServer(root);
+
+  mainWindow = new BrowserWindow({
+    width: 1240,
+    height: 860,
+    minWidth: 960,
+    minHeight: 640,
+    title: APP_TITLE,
+    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    backgroundColor: '#12151c',
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+
+  Menu.setApplicationMenu(null);
+
+  // 标题不被页面改动覆盖（保留品牌署名）
+  mainWindow.on('page-title-updated', (e) => e.preventDefault());
+
+  // 禁止导航到外部与弹出新窗口；http(s) 链接交给系统浏览器
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('http://127.0.0.1:' + port)) {
+      e.preventDefault();
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // 显式 CSP：允许本地资源 + WASM 编译（MediaPipe 必需），阻止远程内容
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self' http://127.0.0.1:*; script-src 'self' http://127.0.0.1:* 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' http://127.0.0.1:* 'unsafe-inline'; img-src 'self' http://127.0.0.1:* data: blob:; worker-src 'self' http://127.0.0.1:* blob:"
+        ]
+      }
+    });
+  });
+
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.on('closed', () => { mainWindow = null; });
+
+  try {
+    await mainWindow.loadURL('http://127.0.0.1:' + port + '/');
+  } catch (err) {
+    // 首次加载偶发失败（GPU/网络服务抖动）时重试一次
+    console.warn('[haoyue] 首次加载失败，重试中:', err && err.message);
+    await new Promise((r) => setTimeout(r, 800));
+    await mainWindow.loadURL('http://127.0.0.1:' + port + '/').catch(() => {});
+  }
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  app.quit();
+});

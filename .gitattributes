@@ -1,0 +1,11 @@
+* text=auto
+
+# Windows 批处理必须保持 CRLF
+*.bat text eol=crlf
+
+# 二进制资源禁止换行转换
+*.png binary
+*.ico binary
+*.jpg binary
+*.wasm binary
+*.tflite binary

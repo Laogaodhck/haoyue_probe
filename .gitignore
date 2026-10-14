@@ -1,0 +1,23 @@
+# 依赖与构建产物
+node_modules/
+release/
+*.tgz
+
+# 本地验证产生的截图、控制台日志与页面快照
+.playwright-cli/
+tools/_verify-*.png
+tools/_verify-*
+
+# 第三方工具的本地会话目录
+.workbuddy/
+
+# 真人测试照片（隐私，不入库；见 tools/verify-*.cjs 的 HAOYUE_PHOTO）
+/fixtures/
+微信图片_*.jpg
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

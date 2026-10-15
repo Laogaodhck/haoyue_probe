@@ -19,7 +19,7 @@
     "productName": "浩玥照片工具",
     "copyright": "老高 · QQ 846193",
     "directories": {
-      "output": "release",
+      "output": "E:/electron-dist/build",
       "buildResources": "assets"
     },
     "files": [

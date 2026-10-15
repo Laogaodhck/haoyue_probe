@@ -3,6 +3,8 @@
  * 修补  : 白色写入蒙版（恢复为人像前景）
  * 擦除  : destination-out（抹除为背景）
  * 支持触控（Pointer Events），画布坐标自动映射工作图坐标。
+ * 增强：中点二次贝塞尔平滑（笔画无棱角）、getCoalescedEvents 全采样（快拖不断线）、
+ *       数位板压感（pen 线宽随压力变化）、亚像素微动跳过（减少重绘）。
  * ============================================================ */
 'use strict';
 
@@ -30,11 +32,15 @@ window.Brush = (function () {
 
   function attach(canvas, st, hooks) {
     var painting = false;
-    var last = null;
     var pointers = {};
+    var pointerCount = 0;
     /* 拖动期间缓存画布矩形与坐标比例，避免每次 pointermove 强制重排（卡顿主因） */
     var rectCache = null;
     var sx = 1, sy = 1, ox = 0, oy = 0, sizeWork = 2;
+    /* 笔画平滑状态：last=上一个原始点，lastMid=上一段中点（二次贝塞尔平滑用） */
+    var last = null, lastMid = null;
+    /* 数位板压感：pointerType === 'pen' 时线宽随 e.pressure 变化 */
+    var penMode = false;
 
     /* CSS px → 工作图坐标；存在缩放视图（st.viewTf：work→画布 px）时取逆变换 */
     function workPoint(e) {
@@ -44,10 +50,9 @@ window.Brush = (function () {
       };
     }
 
-    function strokeTo(p) {
-      var ctx = st.maskCanvas.getContext('2d');
+    function setStyle(ctx, w) {
       ctx.save();
-      ctx.lineWidth = sizeWork;
+      ctx.lineWidth = w;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       if (st.brushMode === 'restore') {
@@ -59,33 +64,71 @@ window.Brush = (function () {
         ctx.strokeStyle = 'rgba(0,0,0,1)';
         ctx.fillStyle = 'rgba(0,0,0,1)';
       }
+    }
+
+    /* 笔画起点：实心圆点 */
+    function dot(p, w) {
+      var ctx = st.maskCanvas.getContext('2d');
+      setStyle(ctx, w);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, w / 2, 0, Math.PI * 2);
       ctx.fill();
-      if (last) {
-        ctx.beginPath();
-        ctx.moveTo(last.x, last.y);
-        ctx.lineTo(p.x, p.y);
-        ctx.stroke();
-      }
       ctx.restore();
+      if (hooks && hooks.onChange) hooks.onChange();
+    }
+
+    /* 笔画延伸：中点二次贝塞尔平滑——
+       以相邻两事件点的中点为端、上一事件点为控制点，消除折线棱角且不滞后跟手 */
+    function segmentTo(p, pressure) {
+      if (!last) return;
+      if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < 0.25) return; // 亚像素微动不重绘
+      var ctx = st.maskCanvas.getContext('2d');
+      var w = penMode
+        ? Math.max(2, sizeWork * (0.35 + 0.65 * (pressure || 0.5)))
+        : sizeWork;
+      var mid = { x: (last.x + p.x) / 2, y: (last.y + p.y) / 2 };
+      setStyle(ctx, w);
+      ctx.beginPath();
+      ctx.moveTo(lastMid.x, lastMid.y);
+      ctx.quadraticCurveTo(last.x, last.y, mid.x, mid.y);
+      ctx.stroke();
+      ctx.restore();
+      lastMid = mid;
       last = p;
       if (hooks && hooks.onChange) hooks.onChange();
+    }
+
+    /* 笔画收尾：补最后半段（中点 → 落点），保证笔画完整落在抬起位置 */
+    function finishStroke() {
+      if (last && lastMid && (Math.abs(last.x - lastMid.x) > 0.1 || Math.abs(last.y - lastMid.y) > 0.1)) {
+        var ctx = st.maskCanvas.getContext('2d');
+        setStyle(ctx, sizeWork);
+        ctx.beginPath();
+        ctx.moveTo(lastMid.x, lastMid.y);
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+        ctx.restore();
+        if (hooks && hooks.onChange) hooks.onChange();
+      }
+      last = null;
+      lastMid = null;
     }
 
     canvas.addEventListener('pointerdown', function (e) {
       if (e.button === 1 || e.button === 2) return;     // 中/右键留给平移等手势
       if (st.mattePanActive) return;                    // 平移/捏合模式不落笔
       pointers[e.pointerId] = true;
-      if (Object.keys(pointers).length > 1) {           // 第二指按下：结束当前笔画，交给缩放
+      pointerCount++;
+      if (pointerCount > 1) {                           // 第二指按下：结束当前笔画，交给缩放
         if (painting) {
           painting = false;
-          last = null;
+          finishStroke();
           if (hooks && hooks.onStrokeEnd) hooks.onStrokeEnd();
         }
         return;
       }
       painting = true;
+      penMode = e.pointerType === 'pen' && e.pressure > 0;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 指针已释放或合成事件时忽略 */ }
       rectCache = canvas.getBoundingClientRect();
       var kc = canvas.width / (rectCache.width || 1);   // CSS px → 画布 px
@@ -102,22 +145,32 @@ window.Brush = (function () {
       }
       sizeWork = Math.max(2, st.brushSize * sx);
       if (hooks && hooks.onStrokeStart) hooks.onStrokeStart(snapMask(st));
-      last = null;
-      strokeTo(workPoint(e));
+      last = lastMid = null;
+      var p0 = workPoint(e);
+      last = lastMid = p0;
+      dot(p0, penMode ? Math.max(2, sizeWork * (0.35 + 0.65 * e.pressure)) : sizeWork);
       e.preventDefault();
     });
 
     canvas.addEventListener('pointermove', function (e) {
-      if (!painting || Object.keys(pointers).length > 1) return;
-      strokeTo(workPoint(e));
+      if (!painting || pointerCount > 1) return;
+      /* getCoalescedEvents：取浏览器本次事件前批量合并的全部原始采样点，
+         快速拖动时不再丢采样 → 笔画连贯无断线（Chromium 对 mouse/touch/pen 均支持） */
+      var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+      if (evs && evs.length) {
+        for (var i = 0; i < evs.length; i++) segmentTo(workPoint(evs[i]), evs[i].pressure);
+      } else {
+        segmentTo(workPoint(e), e.pressure);
+      }
       e.preventDefault();
     });
 
     function stop(e) {
       delete pointers[e.pointerId];
+      if (pointerCount > 0) pointerCount--;
       if (!painting) return;
       painting = false;
-      last = null;
+      finishStroke();
       if (hooks && hooks.onStrokeEnd) hooks.onStrokeEnd();
     }
     canvas.addEventListener('pointerup', stop);

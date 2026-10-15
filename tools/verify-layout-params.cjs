@@ -33,15 +33,10 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
     'A4 一寸 7列×7行=49（实际 ' + cap.a4_1inch.cols + '×' + cap.a4_1inch.rows + '=' + cap.a4_1inch.capacity + '）');
   assert(cap.six_1inch.capacity === 10, '六寸 一寸 10 张不变（实际 ' + cap.six_1inch.capacity + '）');
 
-  /* 2. 间距滑块联动正常（第 1 步面板内） */
-  await page.$eval('#sheet-gap', el => { el.value = 10; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  await sleep(200);
-  const gapVal = await page.$eval('#sheet-gap-val', el => el.textContent);
-  assert(gapVal === '10px', '间距滑块联动（' + gapVal + '）');
-  await page.$eval('#sheet-gap', el => { el.value = 28; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  await sleep(200);
+  /* 2. 间距滑块已移除（间距固定 2.4mm，无 UI 调整） */
+  assert(await page.$('#sheet-gap') === null, '间距滑块已从模板步移除');
 
-  /* 3. 排版模块真实出图（默认间距 28px） */
+  /* 3. 排版模块真实出图（引擎默认间距 28px=2.4mm） */
   await page.setInputFiles('#sheet-file-input', ROOT + '/fixtures/photo.jpg');
   await sleep(1500);
   await page.click('#btn-sheet-to-import');
@@ -61,7 +56,7 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
   assert(d.w > 500 && d.h > 500, '排版预览画布有内容（' + d.w + '×' + d.h + '，打印版 2480×3508@300DPI）');
   assert(d.nonWhite > 500, '排版内容非空白（非白像素 ' + d.nonWhite + '）：' + d.info.slice(0, 40));
 
-  /* 4. 纵向定位规则（引擎级实测）：所有页首行统一精确落在 6.16mm（73px），
+  /* 4. 纵向定位规则（引擎级实测）：所有页首行统一精确落在 7mm（83px），
    *    不管本页多少张（含恰好排满），余量留底部；多页首行位置一致 */
   const lay = await page.evaluate(() => {
     const mk = () => {
@@ -72,7 +67,7 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
       return c;
     };
     const measure = (cells) => {
-      const r = window.Composer.layoutBatch(cells, 'a4', { gap: 28, cutLines: false });
+      const r = window.Composer.layoutBatch(cells, 'a4', { cutLines: false });
       return r.pages.map((pg) => {
         const ctx = pg.canvas.getContext('2d');
         const img = ctx.getImageData(0, 0, r.width, r.height).data;
@@ -96,17 +91,17 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
       multi: measure(Array.from({ length: 60 }, mk))    // 60 张 → 2 页（49+11）
     };
   });
-  const expectTop = Math.round(6.16 * 300 / 25.4);        // 73px ≈ 6.16mm
+  const expectTop = Math.round(7 * 300 / 25.4);           // 83px = 7mm
   assert(lay.partial[0].rowsUsed === 5 && lay.single[0].rowsUsed === 1,
     '30 张 → 5 行、1 张 → 1 行（实际 ' + lay.partial[0].rowsUsed + '/' + lay.single[0].rowsUsed + '）');
   assert(lay.single[0].first === expectTop,
-    '1 张：首行精确 73px（实际 ' + lay.single[0].first + 'px）');
+    '1 张：首行精确 83px（实际 ' + lay.single[0].first + 'px）');
   assert(lay.partial[0].first === expectTop,
-    '30 张（末页不满）：首行精确 73px（实际 ' + lay.partial[0].first + 'px）');
+    '30 张（末页不满）：首行精确 83px（实际 ' + lay.partial[0].first + 'px）');
   assert(lay.full[0].first === expectTop,
-    '49 张（恰好排满）：首行精确 73px（实际 ' + lay.full[0].first + 'px）');
+    '49 张（恰好排满）：首行精确 83px（实际 ' + lay.full[0].first + 'px）');
   assert(lay.multi.length === 2 && lay.multi[0].first === expectTop && lay.multi[1].first === expectTop,
-    '60 张分 2 页：两页首行均精确 73px（实际 ' + lay.multi.map(p => p.first).join('/') + 'px）');
+    '60 张分 2 页：两页首行均精确 83px（实际 ' + lay.multi.map(p => p.first).join('/') + 'px）');
 
   assert(errors.length === 0, '无页面脚本错误' + (errors.length ? '：' + errors.join(' | ') : ''));
   await browser.close(); server.kill();

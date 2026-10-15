@@ -1,5 +1,5 @@
 /* ============================================================
- * main.js — 浩玥照片工具 Electron 主进程
+ * main.js — 浩玥全能工具箱 Electron 主进程
  * 全部资源本地化：内置静态服务 + 本地窗口，断网完整可用。
  * ============================================================ */
 'use strict';
@@ -7,8 +7,9 @@
 const { app, BrowserWindow, Menu, shell, session, ipcMain } = require('electron');
 const path = require('path');
 const { createStaticServer } = require('./static-server');
+const { buildPrintDoc } = require('./print-doc');
 
-const APP_TITLE = '浩玥照片工具';
+const APP_TITLE = '浩玥全能工具箱';
 let mainWindow = null;
 let serverPort = 0;
 /* 打印页内存路由：key=/__print__/<token>，value=html。经内置静态服务
@@ -46,16 +47,15 @@ function registerPrintIpc() {
     });
   });
 
+  /* 打印图片（支持多页）：dataUrl（单张，兼容旧调用）或 dataUrls（多张）。
+     全部页合并为一次打印任务——一个隐藏窗口装载整份多页文档、一次 print()
+     发送；逐页各发任务会让打印机驱动每个任务弹一次确认框。 */
   ipcMain.handle('print:printImage', async (e, payload) => {
-    const { dataUrl, printerName, copies, pageSize, landscape, marginType } = payload || {};
-    if (!dataUrl || typeof dataUrl !== 'string' || dataUrl.indexOf('data:image/') !== 0) {
-      return { ok: false, error: '无效的图片数据' };
-    }
+    const { dataUrl, dataUrls, printerName, copies, pageSize, landscape, marginType } = payload || {};
+    const doc = buildPrintDoc(Array.isArray(dataUrls) && dataUrls.length ? dataUrls : [dataUrl], pageSize, !!landscape);
+    if (!doc.pageCount) return { ok: false, error: '无效的图片数据' };
     // 隐藏窗口装载图片，按所选纸张/方向/边距静默发送到指定打印机
-    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
-      + '@page{margin:0}html,body{margin:0;padding:0;background:#fff}'
-      + 'img{display:block;width:100%;height:auto}'
-      + '</style></head><body><img src="' + dataUrl + '"></body></html>';
+    const html = doc.html;
     const token = 'p' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const route = '/__print__/' + token;
     printPages.set(route, html);

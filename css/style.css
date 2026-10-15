@@ -149,6 +149,38 @@ body[data-module="sheet"] #sheet-steps-nav { display: flex; }
 .check-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; cursor: pointer; margin: 8px 0; }
 .check-row input { accent-color: var(--accent); }
 .hint-text { font-size: 12px; color: var(--text-dim); margin-top: 6px; word-break: break-all; }
+/* 批量导入进度条：导入中显示 x/N，完成后短暂满格再收起 */
+.import-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.import-progress[hidden] { display: none; }
+.import-progress-track {
+  flex: 1; height: 8px; border-radius: var(--radius-sm);
+  background: var(--bg-canvas); overflow: hidden;
+}
+.import-progress-bar {
+  height: 100%; width: 0%; border-radius: var(--radius-sm);
+  background: var(--accent); transition: width .18s ease;
+}
+.import-progress-text { font-size: 12px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ---------- 页码按钮列表（排版预览 / 打印预览共用） ----------
+ * 当前页高亮；总页数多时首页/末页/当前页±1 之外以省略号代替 */
+.pager {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 6px; margin: 0 0 10px;
+}
+.pager-btn {
+  min-width: 32px; height: 30px; padding: 0 9px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-dim);
+  font-size: 13px; line-height: 1; font-variant-numeric: tabular-nums;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.pager-btn:hover { border-color: var(--accent); color: var(--text); background: var(--bg-hover); }
+.pager-btn.active {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; font-weight: 600; cursor: default;
+}
+.pager-gap { color: var(--text-dim); font-size: 13px; padding: 0 2px; user-select: none; }
 .sheet-wrap.full { flex: 1; justify-content: center; }
 .step {
   display: flex;
@@ -179,7 +211,8 @@ main { padding: 20px; max-width: 1280px; margin: 0 auto; }
 .step-panel { display: none; }
 .step-panel.active { display: block; }
 
-#step-matte.active, #step-spec.active, #step-export.active {
+#step-matte.active, #step-spec.active, #step-export.active,
+#sheetstep-tpl.active, #sheetstep-import.active, #sheetstep-preview.active, #sheetstep-print.active {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 18px;
@@ -590,7 +623,8 @@ button:disabled, .btn-col button:disabled, .btn-row button:disabled {
 /* ---------- 响应式 ---------- */
 /* 中屏（≤860px）：左右分栏改上下堆叠，画布优先展示（内容优先级：先看到操作对象） */
 @media (max-width: 860px) {
-  #step-matte.active, #step-spec.active, #step-export.active {
+  #step-matte.active, #step-spec.active, #step-export.active,
+  #sheetstep-tpl.active, #sheetstep-import.active, #sheetstep-preview.active, #sheetstep-print.active {
     grid-template-columns: 1fr;
   }
   .panel { order: 2; }

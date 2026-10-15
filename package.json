@@ -1,8 +1,8 @@
 {
   "name": "haoyue-idphoto",
-  "productName": "浩玥照片工具",
+  "productName": "浩玥全能工具箱",
   "version": "1.0.0",
-  "description": "浩玥照片工具 - 纯本地离线证件照制作工具（AI 人像分割 / 换底 / 排版打印）",
+  "description": "浩玥全能工具箱 - 纯本地离线证件照制作工具（AI 人像分割 / 换底 / 排版打印）",
   "main": "electron/main.js",
   "author": "laogao <846193@qq.com>",
   "license": "MIT",
@@ -16,10 +16,10 @@
   },
   "build": {
     "appId": "com.haoyue.idphoto",
-    "productName": "浩玥照片工具",
+    "productName": "浩玥全能工具箱",
     "copyright": "老高 · QQ 846193",
     "directories": {
-      "output": "E:/electron-dist/build",
+      "output": "E:/electron-dist/build4",
       "buildResources": "assets"
     },
     "files": [
@@ -57,12 +57,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "浩玥照片工具",
-      "uninstallDisplayName": "浩玥照片工具",
-      "artifactName": "浩玥照片工具 Setup ${version}.${ext}"
+      "shortcutName": "浩玥全能工具箱",
+      "uninstallDisplayName": "浩玥全能工具箱",
+      "artifactName": "浩玥全能工具箱 Setup ${version}.${ext}"
     },
     "portable": {
-      "artifactName": "浩玥照片工具_便携版.exe"
+      "artifactName": "浩玥全能工具箱_便携版.exe"
     }
   },
   "devDependencies": {

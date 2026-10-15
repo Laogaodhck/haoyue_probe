@@ -1,5 +1,6 @@
 /* ============================================================
  * print.js — 直接打印（Electron IPC）：单张成品打印 + 排版整版打印
+ * 多页合并为一个打印任务一次发送（避免驱动逐任务弹确认框）。
  * 浏览器模式下 window.haoyuePrint 不存在，相关面板自动隐藏并提示。
  * ============================================================ */
 'use strict';
@@ -66,14 +67,13 @@
       status.textContent = '正在发送打印任务…';
       var fail = null;
       try {
-        for (var i = 0; i < jobs.length; i++) {
-          var res = await printApi.printImage({
-            dataUrl: jobs[i],
-            printerName: sel.value || undefined,
-            copies: +($(prefix + '-copies').value) || 1
-          });
-          if (!res.ok) { fail = res.error; break; }
-        }
+        /* 多张一次发送：单任务合并所有页，避免驱动逐任务弹确认框 */
+        var res = await printApi.printImage({
+          dataUrls: jobs,
+          printerName: sel.value || undefined,
+          copies: +($(prefix + '-copies').value) || 1
+        });
+        if (!res.ok) fail = res.error;
       } catch (e) {
         fail = e.message;
       }
@@ -192,7 +192,7 @@
     }
   }
 
-  /* 执行打印：逐页发送，携带纸张/方向/边距/份数 */
+  /* 执行打印：全部页合并为一个任务发送，携带纸张/方向/边距/份数 */
   async function printSheets() {
     var sheetPages = App.sheet.getPages();
     if (!sheetPages) {
@@ -215,12 +215,12 @@
     status.textContent = '正在发送打印任务…';
     var fail = null;
     try {
-      for (var i = 0; i < sheetPages.pages.length; i++) {
-        var res = await printApi.printImage(Object.assign({
-          dataUrl: sheetPages.pages[i].canvas.toDataURL('image/png')
-        }, params));
-        if (!res.ok) { fail = res.error; break; }
-      }
+      /* 所有排版页合并为一个打印任务一次发送：
+         逐页各发任务会触发打印机驱动弹出多个确认框 */
+      var res = await printApi.printImage(Object.assign({
+        dataUrls: sheetPages.pages.map(function (p) { return p.canvas.toDataURL('image/png'); })
+      }, params));
+      if (!res.ok) fail = res.error;
     } catch (e) {
       fail = e.message;
     }

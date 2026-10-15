@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>浩玥照片工具 · 老高 QQ 846193</title>
+<title>浩玥全能工具箱 · 老高 QQ 846193</title>
 <link rel="icon" href="assets/icon.png">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -12,14 +12,12 @@
 <header class="topbar">
   <div class="brand">
     <img class="brand-logo" src="assets/icon.png" alt="">
-    <span class="brand-name">浩玥照片工具</span>
+    <span class="brand-name">浩玥全能工具箱</span>
     <span class="badge">离线版</span>
     <span class="credit">老高 · QQ 846193</span>
   </div>
   <nav class="modules">
     <button class="module-tab active" data-module="home">首页</button>
-    <button class="module-tab" data-module="photo">照片</button>
-    <button class="module-tab" data-module="sheet">排版</button>
   </nav>
   <nav class="steps" id="steps-nav">
     <div class="step active" data-step="upload"><i>1</i>上传照片</div>
@@ -42,8 +40,8 @@
 <!-- ========== 首页 ========== -->
 <div id="view-home" class="home-view">
   <aside class="home-declare">
-    <img class="home-logo" src="assets/icon.png" alt="浩玥照片工具">
-    <h2 class="home-name">浩玥照片工具</h2>
+    <img class="home-logo" src="assets/icon.png" alt="浩玥全能工具箱">
+    <h2 class="home-name">浩玥全能工具箱</h2>
     <div class="home-version">桌面离线版 v1.0.0</div>
     <div class="home-divider"></div>
     <h3 class="home-h3">软件声明</h3>
@@ -70,6 +68,22 @@
       <span class="hc-body">
         <span class="hc-title">排版工具</span>
         <span class="hc-desc">批量导入照片 · 六寸 / A4 相纸排版 · 裁切线 · 打印预览与直接打印</span>
+      </span>
+      <span class="hc-arrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <button class="home-card" id="home-batch" type="button">
+      <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
+      <span class="hc-body">
+        <span class="hc-title">批量工具</span>
+        <span class="hc-desc">批量添加水印 / 重命名 / 格式转换 / 压缩 · 敬请期待</span>
+      </span>
+      <span class="hc-arrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <button class="home-card" id="home-print" type="button">
+      <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
+      <span class="hc-body">
+        <span class="hc-title">打印工具</span>
+        <span class="hc-desc">图片批量打印 · 排版打印 · 打印机管理 · 敬请期待</span>
       </span>
       <span class="hc-arrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
     </button>
@@ -254,16 +268,11 @@
         <option value="a3">A3 竖版 · 3508×4961px</option>
         <option value="6inch">六寸横版 · 1800×1200px</option>
       </select>
-      <div class="hint-text">六寸整版约 10 张（一寸），A4 整版 49 张（一寸，7 列 × 7 行，列距 2.4mm）；照片超出一版时自动分页</div>
+      <div class="hint-text">六寸整版约 10 张（一寸），A4 整版 49 张（一寸，7 列 × 7 行，间距 2.4mm）；照片超出一版时自动分页</div>
 
-      <div class="field">
-        <label>间距 <span id="sheet-gap-val">28px</span></label>
-        <input type="range" id="sheet-gap" min="0" max="40" value="28">
-      </div>
       <label class="check-row"><input type="checkbox" id="sheet-cutlines" checked> 显示裁切线</label>
 
       <div class="btn-row bottom">
-        <button id="btn-sheet-back-photo" class="ghost">← 返回照片模块</button>
         <button id="btn-sheet-to-import" class="primary">下一步：导入照片 →</button>
       </div>
     </aside>
@@ -285,6 +294,12 @@
         <input type="file" id="sheet-file-input" accept="image/*" multiple hidden>
       </div>
       <div id="sheet-file-name" class="hint-text"></div>
+      <div id="sheet-import-progress" class="import-progress" hidden>
+        <div class="import-progress-track">
+          <div id="sheet-import-bar" class="import-progress-bar"></div>
+        </div>
+        <span id="sheet-import-text" class="import-progress-text" role="status"></span>
+      </div>
 
       <div class="btn-row">
         <button id="btn-sheet-clear" class="ghost">清空已导入</button>
@@ -308,10 +323,6 @@
     <aside class="panel">
       <h3>排版结果</h3>
       <div id="sheet-info" class="spec-info"></div>
-      <div class="field" id="sheet-page-row" hidden>
-        <label>预览页码</label>
-        <select id="sheet-page" class="select"></select>
-      </div>
 
       <h3>导出与打印</h3>
       <div class="btn-col">
@@ -326,6 +337,7 @@
     <div class="stage export-stage">
       <div class="canvas-wrap sheet-wrap full">
         <div class="preview-title">排版预览（300DPI）</div>
+        <nav id="sheet-pager" class="pager" hidden aria-label="排版页码"></nav>
         <canvas id="laysheet-preview"></canvas>
         <div id="sheet-empty-tip" class="stage-tip">请先在第二步导入照片</div>
       </div>
@@ -389,6 +401,7 @@
     <div class="stage export-stage">
       <div class="canvas-wrap sheet-wrap full">
         <div class="preview-title">打印预览</div>
+        <nav id="print-pager" class="pager" hidden aria-label="打印预览页码"></nav>
         <canvas id="print-preview-canvas"></canvas>
       </div>
     </div>

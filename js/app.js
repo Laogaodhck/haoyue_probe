@@ -592,6 +592,9 @@ window.App = (function () {
     });
     $('home-photo').addEventListener('click', function () { showModule('photo'); });
     $('home-sheet').addEventListener('click', function () { showModule('sheet'); });
+    // 待开发入口：批量工具 / 打印工具
+    $('home-batch').addEventListener('click', function () { toast('批量工具待开发中，敬请期待'); });
+    $('home-print').addEventListener('click', function () { toast('打印工具待开发中，敬请期待'); });
   }
 
   /* ================= 启动 ================= */

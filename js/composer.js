@@ -58,13 +58,12 @@ window.Composer = (function () {
   }
 
   /* ---------- 相纸排版引擎（支持多种相纸，供照片/排版两模块共用） ----------
-   * 版面参数为实测标定方案（300DPI）：
-   *   列距 2.4mm(28px) · 行距 2.12mm(25px) · 左右安全边距 5mm(59px)
+   * 版面参数为实测标定方案（300DPI）：间距横纵固定 2.4mm(28px) · 左右安全边距 5mm(59px)
    * A4 一寸可排 7 列 × 7 行 = 49 张；水平按列宽居中，
-   * 批量逐格版（layoutBatch）所有页首行统一锚定 6.16mm(73px)，余量留底部 */
+   * 批量逐格版（layoutBatch）所有页首行统一锚定 7mm(83px)，余量留底部 */
   var MM = 300 / 25.4;
   var GAP_X = Math.round(2.4 * MM);    // 28px
-  var GAP_Y = Math.round(2.12 * MM);   // 25px
+  var GAP_Y = GAP_X;                   // 间距固定 2.4mm（横纵一致）
   var MARGIN_X = Math.round(5 * MM);   // 59px
   var MARGIN_Y = Math.round(5 * MM);   // 59px
 
@@ -231,9 +230,9 @@ window.Composer = (function () {
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, paper.w, paper.h);
 
-      // 纵向定位：所有页统一顶部锚定——首行精确落在 6.16mm（73px@300DPI），
+      // 纵向定位：所有页统一顶部锚定——首行精确落在 7mm（83px@300DPI），
       // 不管本页多少张（含恰好排满），多余空间全部留在底部；多页叠放裁切时每页首行位置一致
-      var startY = Math.round(6.16 * MM);   // 73px ≈ 6.16mm
+      var startY = Math.round(7 * MM);   // 83px = 7mm
 
       for (var i = 0; i < chunk.length; i++) {
         var x = startX + (i % cap.cols) * (cellW + gapX);

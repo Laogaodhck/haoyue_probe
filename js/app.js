@@ -131,6 +131,13 @@ window.App = (function () {
       fileInput.value = '';
     });
     dropzone.addEventListener('click', function () { fileInput.click(); });
+    // 键盘激活（与 role="button" 语义一致）：Enter / Space 打开文件选择
+    dropzone.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
     ['dragover', 'dragenter'].forEach(function (ev) {
       dropzone.addEventListener(ev, function (e) {
         e.preventDefault();

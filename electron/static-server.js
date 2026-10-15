@@ -23,12 +23,20 @@ const MIME = {
   '.tflite': 'application/octet-stream'
 };
 
-function createStaticServer(root) {
+function createStaticServer(root, memoryPages) {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       try {
         let urlPath = decodeURIComponent(req.url.split('?')[0]);
         if (urlPath === '/') urlPath = '/index.html';
+        /* 内存路由优先（如打印页）：免磁盘、无 data: URL 2MB 长度限制 */
+        if (memoryPages && memoryPages.has(urlPath)) {
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store'
+          });
+          return res.end(memoryPages.get(urlPath));
+        }
         const filePath = path.join(root, urlPath);
         if (!filePath.startsWith(root)) {
           res.writeHead(403);

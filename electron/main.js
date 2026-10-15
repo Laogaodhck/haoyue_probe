@@ -10,6 +10,11 @@ const { createStaticServer } = require('./static-server');
 
 const APP_TITLE = '浩玥照片工具';
 let mainWindow = null;
+let serverPort = 0;
+/* 打印页内存路由：key=/__print__/<token>，value=html。经内置静态服务
+   以 http://127.0.0.1 提供（与主窗口同源、生产已验证可靠的装载路径），
+   规避 Chromium data: URL 2MB 上限（ERR_INVALID_URL -300）与临时文件清理 */
+const printPages = new Map();
 
 /* ---------- 打印 IPC：读取本地打印机 + 静默打印图片 ---------- */
 function registerPrintIpc() {
@@ -51,12 +56,15 @@ function registerPrintIpc() {
       + '@page{margin:0}html,body{margin:0;padding:0;background:#fff}'
       + 'img{display:block;width:100%;height:auto}'
       + '</style></head><body><img src="' + dataUrl + '"></body></html>';
+    const token = 'p' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const route = '/__print__/' + token;
+    printPages.set(route, html);
     const printWin = new BrowserWindow({
       show: false,
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
     });
     try {
-      await printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+      await printWin.loadURL('http://127.0.0.1:' + serverPort + route);
       const opts = {
         silent: true,
         printBackground: true,
@@ -75,6 +83,8 @@ function registerPrintIpc() {
     } catch (err) {
       printWin.destroy();
       return { ok: false, error: String((err && err.message) || err) };
+    } finally {
+      printPages.delete(route);
     }
   });
 }
@@ -102,7 +112,8 @@ app.on('second-instance', () => {
 
 async function createWindow() {
   const root = app.getAppPath(); // 打包后指向 app.asar
-  const { port, close } = await createStaticServer(root);
+  const { port, close } = await createStaticServer(root, printPages);
+  serverPort = port;
 
   mainWindow = new BrowserWindow({
     width: 1240,

@@ -231,9 +231,12 @@ window.Composer = (function () {
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, paper.w, paper.h);
 
-      // 上下留白对称：按本页实际使用行数垂直居中（网格整体高度居中于页面）
+      // 纵向定位：满页上下留白对称（垂直居中）；末页不满时按指定上留白 6.16mm 顶部对齐，
+      // 多余空间留在底部（避免居中导致照片悬在页面中部，裁切不便）
       var gridH = rowsUsed * cellH + (rowsUsed - 1) * gapY;
-      var startY = Math.round((paper.h - gridH) / 2);
+      var startY = (rowsUsed < cap.rows)
+        ? Math.round(6.16 * MM)                       // 末页不满：上留白 6.16mm（≈73px@300DPI）
+        : Math.round((paper.h - gridH) / 2);          // 满页：垂直居中，上下对称
 
       for (var i = 0; i < chunk.length; i++) {
         var x = startX + (i % cap.cols) * (cellW + gapX);

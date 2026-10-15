@@ -61,6 +61,27 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
   assert(d.w > 500 && d.h > 500, '排版预览画布有内容（' + d.w + '×' + d.h + '，打印版 2480×3508@300DPI）');
   assert(d.nonWhite > 500, '排版内容非空白（非白像素 ' + d.nonWhite + '）：' + d.info.slice(0, 40));
 
+  /* 4. 上下留白对称：预览画布首/末非白内容行到上下边缘的距离应相等（±1px 容差） */
+  const sym = await page.evaluate(() => {
+    const c = document.getElementById('laysheet-preview');
+    const ctx = c.getContext('2d');
+    const img = ctx.getImageData(0, 0, c.width, c.height).data;
+    const rowNonWhite = (y) => {
+      for (let x = 0; x < c.width; x++) {
+        const i = (y * c.width + x) * 4;
+        if (img[i] < 240 || img[i + 1] < 240 || img[i + 2] < 240) return true;
+      }
+      return false;
+    };
+    let first = -1, last = -1;
+    for (let y = 0; y < c.height; y++) { if (rowNonWhite(y)) { first = y; break; } }
+    for (let y = c.height - 1; y >= 0; y--) { if (rowNonWhite(y)) { last = y; break; } }
+    if (first < 0) return null;
+    return { top: first, bottom: c.height - 1 - last, h: c.height };
+  });
+  assert(sym && Math.abs(sym.top - sym.bottom) <= 1,
+    '上下留白对称（上 ' + sym.top + 'px / 下 ' + sym.bottom + 'px @预览 ' + sym.h + 'px 高）');
+
   assert(errors.length === 0, '无页面脚本错误' + (errors.length ? '：' + errors.join(' | ') : ''));
   await browser.close(); server.kill();
   console.log('结果: ' + pass + ' 通过, ' + fail + ' 失败');

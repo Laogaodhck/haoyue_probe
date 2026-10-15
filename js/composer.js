@@ -59,8 +59,9 @@ window.Composer = (function () {
 
   /* ---------- 相纸排版引擎（支持多种相纸，供照片/排版两模块共用） ----------
    * 版面参数为实测标定方案（300DPI）：
-   *   列距 2.4mm(28px) · 行距 2.12mm(25px) · 上下左右安全边距 5mm(59px)
-   * A4 一寸可排 7 列 × 7 行 = 49 张，水平自动居中 */
+   *   列距 2.4mm(28px) · 行距 2.12mm(25px) · 左右安全边距 5mm(59px)
+   * A4 一寸可排 7 列 × 7 行 = 49 张；水平按列宽居中，
+   * 垂直按实际行数整版居中（上下留白对称） */
   var MM = 300 / 25.4;
   var GAP_X = Math.round(2.4 * MM);    // 28px
   var GAP_Y = Math.round(2.12 * MM);   // 25px
@@ -230,9 +231,13 @@ window.Composer = (function () {
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, paper.w, paper.h);
 
+      // 上下留白对称：按本页实际使用行数垂直居中（网格整体高度居中于页面）
+      var gridH = rowsUsed * cellH + (rowsUsed - 1) * gapY;
+      var startY = Math.round((paper.h - gridH) / 2);
+
       for (var i = 0; i < chunk.length; i++) {
         var x = startX + (i % cap.cols) * (cellW + gapX);
-        var y = MARGIN_Y + Math.floor(i / cap.cols) * (cellH + gapY);
+        var y = startY + Math.floor(i / cap.cols) * (cellH + gapY);
         ctx.drawImage(chunk[i], x, y);
         if (opts.cutLines !== false) {
           ctx.save();

@@ -57,8 +57,15 @@ window.Composer = (function () {
     ctx.restore();
   }
 
-  /* ---------- 相纸排版引擎（支持多种相纸，供照片/排版两模块共用） ---------- */
-  var GAP = 12, MARGIN = 24;
+  /* ---------- 相纸排版引擎（支持多种相纸，供照片/排版两模块共用） ----------
+   * 版面参数为实测标定方案（300DPI）：
+   *   列距 2.4mm(28px) · 行距 2.12mm(25px) · 上下左右安全边距 5mm(59px)
+   * A4 一寸可排 7 列 × 7 行 = 49 张，水平自动居中 */
+  var MM = 300 / 25.4;
+  var GAP_X = Math.round(2.4 * MM);    // 28px
+  var GAP_Y = Math.round(2.12 * MM);   // 25px
+  var MARGIN_X = Math.round(5 * MM);   // 59px
+  var MARGIN_Y = Math.round(5 * MM);   // 59px
 
   var PAPERS = {
     '6inch': { name: '六寸横版', w: 1800, h: 1200 },
@@ -68,19 +75,24 @@ window.Composer = (function () {
     'a3':    { name: 'A3 竖版',  w: 3508, h: 4961 }   /* 297×420mm */
   };
 
-  function bestLayout(pw, ph, sheetW, sheetH, gap, margin) {
-    sheetW = sheetW || 1800; sheetH = sheetH || 1200;
-    gap = (typeof gap === 'number') ? gap : GAP;
-    margin = (typeof margin === 'number') ? margin : MARGIN;
+  /* opts: { gapX, gapY, marginX, marginY }（省略项用默认标定值） */
+  function bestLayout(pw, ph, sheetW, sheetH, opts) {
+    sheetW = sheetW || 1800; sheetH = sheetH || 1200;   // 缺省六寸
+    opts = opts || {};
+    var gapX = (typeof opts.gapX === 'number') ? opts.gapX : GAP_X;
+    var gapY = (typeof opts.gapY === 'number') ? opts.gapY : GAP_Y;
+    var mX = (typeof opts.marginX === 'number') ? opts.marginX : MARGIN_X;
+    var mY = (typeof opts.marginY === 'number') ? opts.marginY : MARGIN_Y;
+    var availW = sheetW - 2 * mX, availH = sheetH - 2 * mY;
     var best = null;
     for (var cols = 1; cols <= 24; cols++) {
       for (var rows = 1; rows <= 24; rows++) {
         var w = pw, h = ph; // 保持正立方向，不旋转
-        var tw = cols * w + (cols - 1) * gap;
-        var th = rows * h + (rows - 1) * gap;
-        if (tw > sheetW - 2 * margin || th > sheetH - 2 * margin) continue;
+        var tw = cols * w + (cols - 1) * gapX;
+        var th = rows * h + (rows - 1) * gapY;
+        if (tw > availW || th > availH) continue;
         var n = cols * rows;
-        var waste = (sheetW - 2 * margin) * (sheetH - 2 * margin) - tw * th;
+        var waste = availW * availH - tw * th;
         if (!best || n > best.n || (n === best.n && waste < best.waste)) {
           best = { cols: cols, rows: rows, w: w, h: h, n: n, waste: waste };
         }
@@ -96,12 +108,16 @@ window.Composer = (function () {
   function layoutGroups(cells, paperKey, opts) {
     opts = opts || {};
     var paper = PAPERS[paperKey] || PAPERS['6inch'];
-    var gap = (typeof opts.gap === 'number') ? opts.gap : GAP;
+    /* opts.gap（UI 单滑块）同时作用横纵；gapX/gapY 可分别覆盖 */
+    var gapX = (typeof opts.gapX === 'number') ? opts.gapX
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_X;
+    var gapY = (typeof opts.gapY === 'number') ? opts.gapY
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_Y;
     var n = cells.length;
     if (!n) return null;
 
-    var availH = paper.h - 2 * MARGIN;
-    var groupH = Math.floor((availH - (n - 1) * gap) / n);
+    var availH = paper.h - 2 * MARGIN_Y;
+    var groupH = Math.floor((availH - (n - 1) * gapY) / n);
     if (groupH < 40) return null;
 
     var sheet = document.createElement('canvas');
@@ -113,12 +129,14 @@ window.Composer = (function () {
     var groups = [], total = 0, anyRotated = false;
     for (var i = 0; i < n; i++) {
       var cell = cells[i];
-      // bestLayout 会从 sheetH 中再扣 2×margin，故此处传入 groupH+2×margin 抵消
-      var layout = bestLayout(cell.width, cell.height, paper.w, groupH + 2 * MARGIN, gap, MARGIN);
+      // bestLayout 会从 sheetH 中再扣 2×marginY，故此处传入 groupH+2×marginY 抵消
+      var layout = bestLayout(cell.width, cell.height, paper.w, groupH + 2 * MARGIN_Y,
+        { gapX: gapX, gapY: gapY, marginY: MARGIN_Y });
       var rotated = false;
       if (!layout && cell.width !== cell.height) {
         // 组高放不下正立照片 → 旋转 90° 横向排布（裁切后转正）
-        layout = bestLayout(cell.height, cell.width, paper.w, groupH + 2 * MARGIN, gap, MARGIN);
+        layout = bestLayout(cell.height, cell.width, paper.w, groupH + 2 * MARGIN_Y,
+          { gapX: gapX, gapY: gapY, marginY: MARGIN_Y });
         rotated = !!layout;
       }
       if (!layout) return null;
@@ -132,15 +150,15 @@ window.Composer = (function () {
         rc.drawImage(cell, -cell.width / 2, -cell.height / 2);
       }
       anyRotated = anyRotated || rotated;
-      var tw = layout.cols * layout.w + (layout.cols - 1) * gap;
-      var th = layout.rows * layout.h + (layout.rows - 1) * gap;
-      var availW = paper.w - 2 * MARGIN;
-      var startX = MARGIN + Math.round((availW - tw) / 2);
-      var startY = MARGIN + Math.round(i * (groupH + gap) + (groupH - th) / 2);
+      var tw = layout.cols * layout.w + (layout.cols - 1) * gapX;
+      var th = layout.rows * layout.h + (layout.rows - 1) * gapY;
+      var availW = paper.w - 2 * MARGIN_X;
+      var startX = MARGIN_X + Math.round((availW - tw) / 2);
+      var startY = MARGIN_Y + Math.round(i * (groupH + gapY) + (groupH - th) / 2);
 
       for (var r = 0; r < layout.rows; r++) {
         for (var c = 0; c < layout.cols; c++) {
-          ctx.drawImage(drawCell, startX + c * (layout.w + gap), startY + r * (layout.h + gap));
+          ctx.drawImage(drawCell, startX + c * (layout.w + gapX), startY + r * (layout.h + gapY));
         }
       }
 
@@ -149,11 +167,11 @@ window.Composer = (function () {
         ctx.strokeStyle = 'rgba(120,120,120,0.9)';
         ctx.lineWidth = 1;
         for (var c2 = 0; c2 <= layout.cols; c2++) {
-          var lx = startX + c2 * (layout.w + gap) - (c2 === layout.cols ? 0 : gap / 2);
+          var lx = startX + c2 * (layout.w + gapX) - (c2 === layout.cols ? 0 : gapX / 2);
           ctx.beginPath(); ctx.moveTo(lx, startY); ctx.lineTo(lx, startY + th); ctx.stroke();
         }
         for (var r2 = 0; r2 <= layout.rows; r2++) {
-          var ly = startY + r2 * (layout.h + gap) - (r2 === layout.rows ? 0 : gap / 2);
+          var ly = startY + r2 * (layout.h + gapY) - (r2 === layout.rows ? 0 : gapY / 2);
           ctx.beginPath(); ctx.moveTo(startX, ly); ctx.lineTo(startX + tw, ly); ctx.stroke();
         }
         ctx.restore();
@@ -167,15 +185,19 @@ window.Composer = (function () {
              width: paper.w, height: paper.h, dpi: 300, paper: paper };
   }
 
-  /* sheetCapacity(cellW, cellH, paperKey, gap)
-   * 计算单版可容纳的网格：{ cols, rows, capacity } */
-  function sheetCapacity(cellW, cellH, paperKey, gap) {
+  /* sheetCapacity(cellW, cellH, paperKey, opts)
+   * 计算单版可容纳的网格：{ cols, rows, capacity }（opts 同上，兼容旧数字 gap） */
+  function sheetCapacity(cellW, cellH, paperKey, opts) {
+    opts = (typeof opts === 'number') ? { gap: opts } : (opts || {});
     var paper = PAPERS[paperKey] || PAPERS['6inch'];
-    gap = (typeof gap === 'number') ? gap : GAP;
-    var availW = paper.w - 2 * MARGIN;
-    var availH = paper.h - 2 * MARGIN;
-    var cols = Math.max(1, Math.floor((availW + gap) / (cellW + gap)));
-    var rows = Math.max(1, Math.floor((availH + gap) / (cellH + gap)));
+    var gapX = (typeof opts.gapX === 'number') ? opts.gapX
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_X;
+    var gapY = (typeof opts.gapY === 'number') ? opts.gapY
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_Y;
+    var availW = paper.w - 2 * MARGIN_X;
+    var availH = paper.h - 2 * MARGIN_Y;
+    var cols = Math.max(1, Math.floor((availW + gapX) / (cellW + gapX)));
+    var rows = Math.max(1, Math.floor((availH + gapY) / (cellH + gapY)));
     return { cols: cols, rows: rows, capacity: cols * rows };
   }
 
@@ -186,13 +208,16 @@ window.Composer = (function () {
   function layoutBatch(cells, paperKey, opts) {
     opts = opts || {};
     var paper = PAPERS[paperKey] || PAPERS['6inch'];
-    var gap = (typeof opts.gap === 'number') ? opts.gap : GAP;
+    var gapX = (typeof opts.gapX === 'number') ? opts.gapX
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_X;
+    var gapY = (typeof opts.gapY === 'number') ? opts.gapY
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_Y;
     if (!cells.length) return null;
 
     var cellW = cells[0].width, cellH = cells[0].height;
-    var cap = sheetCapacity(cellW, cellH, paperKey, gap);
-    var availW = paper.w - 2 * MARGIN;
-    var startX = MARGIN + Math.round((availW - (cap.cols * cellW + (cap.cols - 1) * gap)) / 2);
+    var cap = sheetCapacity(cellW, cellH, paperKey, { gapX: gapX, gapY: gapY });
+    var availW = paper.w - 2 * MARGIN_X;
+    var startX = MARGIN_X + Math.round((availW - (cap.cols * cellW + (cap.cols - 1) * gapX)) / 2);
     var pages = [];
 
     for (var p = 0; p * cap.capacity < cells.length; p++) {
@@ -206,8 +231,8 @@ window.Composer = (function () {
       ctx.fillRect(0, 0, paper.w, paper.h);
 
       for (var i = 0; i < chunk.length; i++) {
-        var x = startX + (i % cap.cols) * (cellW + gap);
-        var y = MARGIN + Math.floor(i / cap.cols) * (cellH + gap);
+        var x = startX + (i % cap.cols) * (cellW + gapX);
+        var y = MARGIN_Y + Math.floor(i / cap.cols) * (cellH + gapY);
         ctx.drawImage(chunk[i], x, y);
         if (opts.cutLines !== false) {
           ctx.save();
@@ -231,20 +256,23 @@ window.Composer = (function () {
   function layoutExact(cells, paperKey, opts) {
     opts = opts || {};
     var paper = PAPERS[paperKey] || PAPERS['6inch'];
-    var gap = (typeof opts.gap === 'number') ? opts.gap : GAP;
+    var gapX = (typeof opts.gapX === 'number') ? opts.gapX
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_X;
+    var gapY = (typeof opts.gapY === 'number') ? opts.gapY
+             : (typeof opts.gap === 'number') ? opts.gap : GAP_Y;
     var n = cells.length;
     if (!n) return null;
 
-    var availW = paper.w - 2 * MARGIN;
-    var availH = paper.h - 2 * MARGIN;
+    var availW = paper.w - 2 * MARGIN_X;
+    var availH = paper.h - 2 * MARGIN_Y;
     var first = cells[0];
 
     function tryOrient(w, h) { // 选最省纸的行列组合（cols×rows ≥ n 即可，多余格不用）
       var best = null;
       for (var cols = 1; cols <= n; cols++) {
         var rows = Math.ceil(n / cols);
-        var tw = cols * w + (cols - 1) * gap;
-        var th = rows * h + (rows - 1) * gap;
+        var tw = cols * w + (cols - 1) * gapX;
+        var th = rows * h + (rows - 1) * gapY;
         if (tw > availW || th > availH) continue;
         var waste = availW * availH - tw * th;
         if (!best || waste < best.waste) best = { cols: cols, rows: rows, w: w, h: h, waste: waste };
@@ -276,16 +304,16 @@ window.Composer = (function () {
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, paper.w, paper.h);
 
-    var tw = layout.cols * layout.w + (layout.cols - 1) * gap;
-    var th = layout.rows * layout.h + (layout.rows - 1) * gap;
-    var startX = MARGIN + Math.round((availW - tw) / 2);
-    var startY = MARGIN + Math.round((availH - th) / 2);
+    var tw = layout.cols * layout.w + (layout.cols - 1) * gapX;
+    var th = layout.rows * layout.h + (layout.rows - 1) * gapY;
+    var startX = MARGIN_X + Math.round((availW - tw) / 2);
+    var startY = MARGIN_Y + Math.round((availH - th) / 2);
 
     for (var i = 0; i < n; i++) {
       var col = i % layout.cols;
       var row = Math.floor(i / layout.cols);
-      var x = startX + col * (layout.w + gap);
-      var y = startY + row * (layout.h + gap);
+      var x = startX + col * (layout.w + gapX);
+      var y = startY + row * (layout.h + gapY);
       ctx.drawImage(drawCell, x, y);
       if (opts.cutLines !== false) {
         ctx.save();

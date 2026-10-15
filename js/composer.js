@@ -61,7 +61,7 @@ window.Composer = (function () {
    * 版面参数为实测标定方案（300DPI）：
    *   列距 2.4mm(28px) · 行距 2.12mm(25px) · 左右安全边距 5mm(59px)
    * A4 一寸可排 7 列 × 7 行 = 49 张；水平按列宽居中，
-   * 垂直按实际行数整版居中（上下留白对称） */
+   * 批量逐格版（layoutBatch）所有页首行统一锚定 6.16mm(73px)，余量留底部 */
   var MM = 300 / 25.4;
   var GAP_X = Math.round(2.4 * MM);    // 28px
   var GAP_Y = Math.round(2.12 * MM);   // 25px
@@ -231,12 +231,9 @@ window.Composer = (function () {
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, paper.w, paper.h);
 
-      // 纵向定位：满页上下留白对称（垂直居中）；末页不满时按指定上留白 6.16mm 顶部对齐，
-      // 多余空间留在底部（避免居中导致照片悬在页面中部，裁切不便）
-      var gridH = rowsUsed * cellH + (rowsUsed - 1) * gapY;
-      var startY = (rowsUsed < cap.rows)
-        ? Math.round(6.16 * MM)                       // 末页不满：上留白 6.16mm（≈73px@300DPI）
-        : Math.round((paper.h - gridH) / 2);          // 满页：垂直居中，上下对称
+      // 纵向定位：所有页统一顶部锚定——首行精确落在 6.16mm（73px@300DPI），
+      // 不管本页多少张（含恰好排满），多余空间全部留在底部；多页叠放裁切时每页首行位置一致
+      var startY = Math.round(6.16 * MM);   // 73px ≈ 6.16mm
 
       for (var i = 0; i < chunk.length; i++) {
         var x = startX + (i % cap.cols) * (cellW + gapX);

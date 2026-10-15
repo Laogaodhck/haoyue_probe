@@ -61,8 +61,8 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
   assert(d.w > 500 && d.h > 500, '排版预览画布有内容（' + d.w + '×' + d.h + '，打印版 2480×3508@300DPI）');
   assert(d.nonWhite > 500, '排版内容非空白（非白像素 ' + d.nonWhite + '）：' + d.info.slice(0, 40));
 
-  /* 4. 纵向定位规则（引擎级实测）：
-   *    满页（行数排满）→ 上下留白对称居中；末页不满 → 上留白 6.16mm 顶部对齐 */
+  /* 4. 纵向定位规则（引擎级实测）：所有页首行统一精确落在 6.16mm（73px），
+   *    不管本页多少张（含恰好排满），余量留底部；多页首行位置一致 */
   const lay = await page.evaluate(() => {
     const mk = () => {
       const c = document.createElement('canvas');
@@ -73,34 +73,40 @@ function assert(cond, msg) { if (cond) { pass++; console.log('  ok - ' + msg); }
     };
     const measure = (cells) => {
       const r = window.Composer.layoutBatch(cells, 'a4', { gap: 28, cutLines: false });
-      const ctx = r.pages[0].canvas.getContext('2d');
-      const img = ctx.getImageData(0, 0, r.width, r.height).data;
-      const rowHas = (y) => {
-        for (let x = 0; x < r.width; x++) {
-          const i = (y * r.width + x) * 4;
-          if (img[i] < 240 || img[i + 1] < 240 || img[i + 2] < 240) return true;
-        }
-        return false;
-      };
-      let first = -1, last = -1;
-      for (let y = 0; y < r.height; y++) { if (rowHas(y)) { first = y; break; } }
-      for (let y = r.height - 1; y >= 0; y--) { if (rowHas(y)) { last = y; break; } }
-      return { first, bottom: r.height - 1 - last, rowsUsed: r.pages[0].rowsUsed, cols: r.cols };
+      return r.pages.map((pg) => {
+        const ctx = pg.canvas.getContext('2d');
+        const img = ctx.getImageData(0, 0, r.width, r.height).data;
+        const rowHas = (y) => {
+          for (let x = 0; x < r.width; x++) {
+            const i = (y * r.width + x) * 4;
+            if (img[i] < 240 || img[i + 1] < 240 || img[i + 2] < 240) return true;
+          }
+          return false;
+        };
+        let first = -1, last = -1;
+        for (let y = 0; y < r.height; y++) { if (rowHas(y)) { first = y; break; } }
+        for (let y = r.height - 1; y >= 0; y--) { if (rowHas(y)) { last = y; break; } }
+        return { first, bottom: r.height - 1 - last, rowsUsed: pg.rowsUsed };
+      });
     };
     return {
-      partial: measure(Array.from({ length: 30 }, mk)),   // 30 张 → 5 行 < 7 行（末页不满）
-      full: measure(Array.from({ length: 49 }, mk))       // 49 张 → 7 行排满
+      single: measure([mk()]),                          // 1 张（末页且仅 1 行）
+      partial: measure(Array.from({ length: 30 }, mk)), // 30 张 → 5 行（末页不满）
+      full: measure(Array.from({ length: 49 }, mk)),    // 49 张 → 恰好排满 7 行
+      multi: measure(Array.from({ length: 60 }, mk))    // 60 张 → 2 页（49+11）
     };
   });
   const expectTop = Math.round(6.16 * 300 / 25.4);        // 73px ≈ 6.16mm
-  assert(lay.partial.rowsUsed === 5 && lay.partial.cols === 7,
-    '30 张 → 7 列 × 5 行（实际 ' + lay.partial.cols + '×' + lay.partial.rowsUsed + '）');
-  assert(Math.abs(lay.partial.first - expectTop) <= 2,
-    '末页不满：上留白 6.16mm（首行 ' + lay.partial.first + 'px ≈ ' + expectTop + 'px）');
-  assert(lay.partial.bottom > lay.partial.first * 3,
-    '末页不满：多余留白在底部（下 ' + lay.partial.bottom + 'px > 上 ' + lay.partial.first + 'px）');
-  assert(Math.abs(lay.full.first - lay.full.bottom) <= 2,
-    '满页：上下留白对称（上 ' + lay.full.first + 'px / 下 ' + lay.full.bottom + 'px）');
+  assert(lay.partial[0].rowsUsed === 5 && lay.single[0].rowsUsed === 1,
+    '30 张 → 5 行、1 张 → 1 行（实际 ' + lay.partial[0].rowsUsed + '/' + lay.single[0].rowsUsed + '）');
+  assert(lay.single[0].first === expectTop,
+    '1 张：首行精确 73px（实际 ' + lay.single[0].first + 'px）');
+  assert(lay.partial[0].first === expectTop,
+    '30 张（末页不满）：首行精确 73px（实际 ' + lay.partial[0].first + 'px）');
+  assert(lay.full[0].first === expectTop,
+    '49 张（恰好排满）：首行精确 73px（实际 ' + lay.full[0].first + 'px）');
+  assert(lay.multi.length === 2 && lay.multi[0].first === expectTop && lay.multi[1].first === expectTop,
+    '60 张分 2 页：两页首行均精确 73px（实际 ' + lay.multi.map(p => p.first).join('/') + 'px）');
 
   assert(errors.length === 0, '无页面脚本错误' + (errors.length ? '：' + errors.join(' | ') : ''));
   await browser.close(); server.kill();

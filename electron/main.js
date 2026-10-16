@@ -1,5 +1,5 @@
 /* ============================================================
- * main.js — 浩玥全能工具箱 Electron 主进程
+ * main.js — 浩玥工具箱 Electron 主进程
  * 全部资源本地化：内置静态服务 + 本地窗口，断网完整可用。
  * ============================================================ */
 'use strict';
@@ -9,7 +9,7 @@ const path = require('path');
 const { createStaticServer } = require('./static-server');
 const { buildPrintDoc } = require('./print-doc');
 
-const APP_TITLE = '浩玥全能工具箱';
+const APP_TITLE = '浩玥工具箱';
 let mainWindow = null;
 let serverPort = 0;
 /* 打印页内存路由：key=/__print__/<token>，value=html。经内置静态服务

@@ -580,10 +580,12 @@ window.App = (function () {
     $('view-home').style.display = name === 'home' ? '' : 'none';
     $('view-photo').style.display = name === 'photo' ? '' : 'none';
     $('view-sheet').classList.toggle('active', name === 'sheet');
+    $('view-batch').style.display = name === 'batch' ? 'block' : 'none';
     document.querySelectorAll('.module-tab').forEach(function (t) {
       t.classList.toggle('active', t.dataset.module === name);
     });
     if (name === 'sheet') window.App.sheet.showStep('tpl'); // 每次进入排版模块回到第 1 步
+    if (name === 'batch') window.App.batch.enter();          // 每次进入批量工具回到子功能菜单
   }
 
   function initModules() {
@@ -592,8 +594,8 @@ window.App = (function () {
     });
     $('home-photo').addEventListener('click', function () { showModule('photo'); });
     $('home-sheet').addEventListener('click', function () { showModule('sheet'); });
-    // 待开发入口：批量工具 / 打印工具
-    $('home-batch').addEventListener('click', function () { toast('批量工具待开发中，敬请期待'); });
+    $('home-batch').addEventListener('click', function () { showModule('batch'); });
+    // 待开发入口：打印工具
     $('home-print').addEventListener('click', function () { toast('打印工具待开发中，敬请期待'); });
   }
 
@@ -625,6 +627,7 @@ window.App = (function () {
     initSpec();
     initExport();
     window.App.sheet.init();
+    window.App.batch.init();
     window.App.print.init();
     window.App.settings.applyToUI();
     showModule('home'); // 启动进入首页

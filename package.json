@@ -1,8 +1,8 @@
 {
   "name": "haoyue-idphoto",
-  "productName": "浩玥全能工具箱",
+  "productName": "浩玥工具箱",
   "version": "1.0.0",
-  "description": "浩玥全能工具箱 - 纯本地离线证件照制作工具（AI 人像分割 / 换底 / 排版打印）",
+  "description": "浩玥工具箱 - 纯本地离线证件照制作工具（AI 人像分割 / 换底 / 排版打印）",
   "main": "electron/main.js",
   "author": "laogao <846193@qq.com>",
   "license": "MIT",
@@ -11,15 +11,16 @@
     "serve": "node tools/server.js",
     "dist": "electron-builder --win",
     "icons": "node tools/make-icons.cjs",
-    "test": "node tools/check-refs.cjs && node tools/test-dpi.cjs && node tools/test-hair-clothes.cjs && node tools/test-server.cjs && node tools/test-print-route.cjs && node tools/test-dom.cjs",
+    "test": "node tools/check-refs.cjs && node tools/test-dpi.cjs && node tools/test-hair-clothes.cjs && node tools/test-server.cjs && node tools/test-print-route.cjs && node tools/test-dom.cjs && node tools/test-batch-rename.cjs",
     "verify": "node tools/verify-hair.cjs && node tools/verify-matteview.cjs && node tools/verify-sheet.cjs"
   },
   "build": {
     "appId": "com.haoyue.idphoto",
-    "productName": "浩玥全能工具箱",
+    "productName": "浩玥工具箱",
     "copyright": "老高 · QQ 846193",
+    "publish": null,
     "directories": {
-      "output": "E:/electron-dist/build4",
+      "output": "release-build",
       "buildResources": "assets"
     },
     "files": [
@@ -57,12 +58,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "浩玥全能工具箱",
-      "uninstallDisplayName": "浩玥全能工具箱",
-      "artifactName": "浩玥全能工具箱 Setup ${version}.${ext}"
+      "shortcutName": "浩玥工具箱",
+      "uninstallDisplayName": "浩玥工具箱",
+      "artifactName": "浩玥工具箱 Setup ${version}.${ext}"
     },
     "portable": {
-      "artifactName": "浩玥全能工具箱_便携版.exe"
+      "artifactName": "浩玥工具箱_便携版.exe"
     }
   },
   "devDependencies": {

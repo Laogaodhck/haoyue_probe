@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>浩玥全能工具箱 · 老高 QQ 846193</title>
+<title>浩玥工具箱 · 老高 QQ 846193</title>
 <link rel="icon" href="assets/icon.png">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -12,12 +12,15 @@
 <header class="topbar">
   <div class="brand">
     <img class="brand-logo" src="assets/icon.png" alt="">
-    <span class="brand-name">浩玥全能工具箱</span>
+    <span class="brand-name">浩玥工具箱</span>
     <span class="badge">离线版</span>
     <span class="credit">老高 · QQ 846193</span>
   </div>
   <nav class="modules">
     <button class="module-tab active" data-module="home">首页</button>
+    <button class="module-tab" data-module="photo">照片工具</button>
+    <button class="module-tab" data-module="sheet">排版工具</button>
+    <button class="module-tab" data-module="batch">批量工具</button>
   </nav>
   <nav class="steps" id="steps-nav">
     <div class="step active" data-step="upload"><i>1</i>上传照片</div>
@@ -40,8 +43,8 @@
 <!-- ========== 首页 ========== -->
 <div id="view-home" class="home-view">
   <aside class="home-declare">
-    <img class="home-logo" src="assets/icon.png" alt="浩玥全能工具箱">
-    <h2 class="home-name">浩玥全能工具箱</h2>
+    <img class="home-logo" src="assets/icon.png" alt="浩玥工具箱">
+    <h2 class="home-name">浩玥工具箱</h2>
     <div class="home-version">桌面离线版 v1.0.0</div>
     <div class="home-divider"></div>
     <h3 class="home-h3">软件声明</h3>
@@ -75,7 +78,7 @@
       <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
       <span class="hc-body">
         <span class="hc-title">批量工具</span>
-        <span class="hc-desc">批量添加水印 / 重命名 / 格式转换 / 压缩 · 敬请期待</span>
+        <span class="hc-desc">批量重命名（照片 / 文档） · 更多功能陆续上线</span>
       </span>
       <span class="hc-arrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
     </button>
@@ -83,7 +86,7 @@
       <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
       <span class="hc-body">
         <span class="hc-title">打印工具</span>
-        <span class="hc-desc">图片批量打印 · 排版打印 · 打印机管理 · 敬请期待</span>
+        <span class="hc-desc">批量打印 / 证照打印 / 打印机管理 · 敬请期待</span>
       </span>
       <span class="hc-arrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
     </button>
@@ -409,6 +412,123 @@
 
 </section>
 
+<!-- ========== 批量工具模块 ========== -->
+<div id="view-batch">
+
+  <!-- 子功能菜单 -->
+  <div id="batch-menu" class="batch-menu">
+    <button class="home-card" id="batch-open-rename" type="button">
+      <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
+      <span class="hc-body">
+        <span class="hc-title">批量重命名 <span class="hc-badge">可用</span></span>
+        <span class="hc-desc">按「基础名 + 序号」批量重命名文件夹内的照片 / 文档 · 冲突检测 · 预览确认</span>
+      </span>
+      <span class="hc-arrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <button class="home-card disabled" type="button" disabled>
+      <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.6A2 2 0 0 1 14 7a2 2 0 0 0 2 2 2 2 0 0 1 1.3 3.5"/><path d="M6.4 6.4C4 7.6 3 9 3 9s4 8 9 8c1.4 0 2.7-.4 3.8-.9"/></svg></span>
+      <span class="hc-body">
+        <span class="hc-title">去除水印</span>
+        <span class="hc-desc">图片水印擦除 · 敬请期待</span>
+      </span>
+    </button>
+    <button class="home-card disabled" type="button" disabled>
+      <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+      <span class="hc-body">
+        <span class="hc-title">格式转换</span>
+        <span class="hc-desc">JPG / PNG / WebP / PDF 互转 · 敬请期待</span>
+      </span>
+    </button>
+    <button class="home-card disabled" type="button" disabled>
+      <span class="hc-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>
+      <span class="hc-body">
+        <span class="hc-title">批量压缩</span>
+        <span class="hc-desc">图片 / 文档体积优化 · 敬请期待</span>
+      </span>
+    </button>
+  </div>
+
+  <!-- 重命名面板 -->
+  <section id="batch-rename" class="batch-rename" hidden>
+    <aside class="panel">
+      <h3>选择文件夹</h3>
+      <div class="btn-col">
+        <button id="batch-pick" class="primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg> 选择文件夹…</button>
+      </div>
+      <div id="batch-folder" class="hint-text">未选择文件夹</div>
+      <div id="batch-unsupported" class="hint-text st-bad" hidden>当前浏览器不支持文件夹写入，请使用桌面版（安装版 / start.bat）或 Chrome / Edge 打开</div>
+
+      <h3>文件类型</h3>
+      <select id="batch-kind" class="select">
+        <option value="全部" selected>全部文件</option>
+        <option value="照片">照片（jpg / png / webp / heic…）</option>
+        <option value="文档">文档（pdf / word / excel / txt…）</option>
+        <option value="自定义">自定义后缀…</option>
+      </select>
+      <div class="field" id="batch-custom-row" hidden>
+        <label>自定义后缀（逗号分隔）</label>
+        <input type="text" id="batch-custom-exts" class="num-input" placeholder="jpg, png, pdf" spellcheck="false">
+      </div>
+
+      <h3>命名规则</h3>
+      <div class="field">
+        <label>基础名称</label>
+        <input type="text" id="batch-base" class="num-input" value="文件" spellcheck="false" maxlength="80">
+      </div>
+      <div class="rename-grid">
+        <div class="field">
+          <label>分隔符</label>
+          <select id="batch-sep" class="select">
+            <option value="-" selected>-</option>
+            <option value="_">_</option>
+            <option value="">无</option>
+            <option value=" ">空格</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>起始序号</label>
+          <input type="number" id="batch-start" class="num-input" value="1" min="0" max="99999">
+        </div>
+        <div class="field">
+          <label>序号位数</label>
+          <select id="batch-digits" class="select">
+            <option value="1">1 位</option>
+            <option value="2">2 位</option>
+            <option value="3" selected>3 位</option>
+            <option value="4">4 位</option>
+            <option value="5">5 位</option>
+            <option value="6">6 位</option>
+          </select>
+        </div>
+      </div>
+      <div id="batch-rule-hint" class="hint-text">示例：文件-001.jpg</div>
+
+      <div class="btn-row bottom">
+        <button id="btn-batch-refresh" class="ghost">刷新预览</button>
+        <button id="btn-batch-clear" class="ghost">清空</button>
+        <button id="btn-batch-run" class="primary" disabled><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> 执行重命名</button>
+      </div>
+      <button id="btn-batch-back" class="ghost batch-back">← 返回批量工具</button>
+    </aside>
+
+    <div class="stage">
+      <div class="canvas-wrap batch-table-wrap">
+        <div class="preview-title">重命名预览</div>
+        <div id="batch-summary" class="hint-text"></div>
+        <div class="hint-text">提示：选择「照片」类型时显示缩略图；在「新文件名」输入框中可直接自定义名称（留空则按规则自动编号），清除输入即恢复自动命名。</div>
+        <div class="batch-scroll">
+          <table id="batch-table" class="batch-table">
+            <thead><tr><th>序号</th><th>预览</th><th>原文件名</th><th>新文件名</th><th>状态</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="batch-empty" class="stage-tip">请先选择文件夹</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
 </main>
 
 <!-- 加载遮罩 -->
@@ -420,6 +540,8 @@
 <!-- 轻提示 -->
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <div id="thumb-lightbox" hidden><img id="thumb-lightbox-img" alt="预览大图"></div>
+
 <script src="vendor/mediapipe/vision_bundle.iife.js"></script>
 <script src="js/specs.js"></script>
 <script src="js/dpi.js"></script>
@@ -429,6 +551,7 @@
 <script src="js/matteview.js"></script>
 <script src="js/cropper.js"></script>
 <script src="js/app.js"></script>
+<script src="js/batch.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/sheet.js"></script>
 <script src="js/print.js"></script>

@@ -31,7 +31,6 @@ window.App = (function () {
   var cropperApi = null;
   var matteViewApi = null;
   var renderPending = false;
-  var syncBrushRing = null; // 笔刷圆圈光标尺寸同步器（initMatte 中赋值）
 
   /* ================= 步骤切换 ================= */
   var STEP_ORDER = ['upload', 'matte', 'spec', 'export'];
@@ -169,7 +168,7 @@ window.App = (function () {
     return { w: Math.round(work.width * k), h: Math.round(work.height * k) };
   }
 
-  function renderMatteView() {
+  function renderMatteView(dirtyWork) {
     if (!State.workCanvas) return;
     var canvas = $('matte-view');
     var size = matteViewSize();
@@ -182,12 +181,28 @@ window.App = (function () {
     var tf = { scale: k * mv.zoom, tx: mv.panX, ty: mv.panY };
     State.viewTf = tf;
     var ctx = canvas.getContext('2d');
+
+    // 脏区（工作图坐标）→ 输出坐标矩形，外扩 2px 防锯齿边缘残留；无效则全量重绘
+    var dirty = null;
+    if (dirtyWork) {
+      var x0 = Math.floor(dirtyWork.x0 * tf.scale + tf.tx) - 2;
+      var y0 = Math.floor(dirtyWork.y0 * tf.scale + tf.ty) - 2;
+      var x1 = Math.ceil(dirtyWork.x1 * tf.scale + tf.tx) + 2;
+      var y1 = Math.ceil(dirtyWork.y1 * tf.scale + tf.ty) + 2;
+      x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+      x1 = Math.min(canvas.width, x1); y1 = Math.min(canvas.height, y1);
+      if (x1 > x0 && y1 > y0 && (x1 - x0) * (y1 - y0) < canvas.width * canvas.height * 0.7) {
+        dirty = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      }
+    }
     window.Composer.compositeInto(
       ctx, size.w, size.h,
-      Object.assign({}, State, { transform: tf })
+      Object.assign({}, State, { transform: tf }),
+      dirty
     );
     // 缩放/平移后用虚线标出照片边界（视口外的区域与底色同色，需边界提示）
-    if (mv.zoom > 1 || mv.panX || mv.panY) {
+    // 脏区局部重绘时跳过虚线（笔画结束后会做一次全量重绘补齐）
+    if (!dirty && (mv.zoom > 1 || mv.panX || mv.panY)) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.setLineDash([6, 4]);
@@ -198,12 +213,26 @@ window.App = (function () {
     }
   }
 
-  function scheduleMatteRender() {
+  /* 笔刷每次落笔上报脏区（工作图坐标），同一帧内的多段合并成一个矩形，
+     rAF 到期只对并集做局部合成——拖拽时每帧开销从全画布 5 次绘制降到小矩形 */
+  var pendingDirty = null;
+  function unionDirty(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return {
+      x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0),
+      x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1)
+    };
+  }
+  function scheduleMatteRender(dirty) {
+    pendingDirty = unionDirty(pendingDirty, dirty || null);
     if (renderPending) return;
     renderPending = true;
     requestAnimationFrame(function () {
       renderPending = false;
-      renderMatteView();
+      var d = pendingDirty;
+      pendingDirty = null;
+      renderMatteView(d);
     });
   }
 
@@ -252,27 +281,8 @@ window.App = (function () {
     $('mv-zoom-out').addEventListener('click', function () { matteViewApi.zoomStep(1 / 1.25); });
     $('mv-zoom-fit').addEventListener('click', function () { matteViewApi.fit(); });
 
-    // 笔刷圆圈光标（替代系统十字标）：跟随鼠标，直径 = 笔刷大小 × 2
-    var ring = document.createElement('div');
-    ring.id = 'brush-cursor';
-    ring.hidden = true;
-    document.body.appendChild(ring);
-    syncBrushRing = function () {
-      var d = Math.max(6, State.brushSize * 2);
-      ring.style.width = d + 'px';
-      ring.style.height = d + 'px';
-    };
-    var view = $('matte-view');
-    view.addEventListener('mouseenter', function () {
-      syncBrushRing();
-      ring.hidden = panMode;
-    });
-    view.addEventListener('mouseleave', function () { ring.hidden = true; });
-    view.addEventListener('mousemove', function (e) {
-      ring.hidden = panMode; // 平移模式下隐藏笔刷圈
-      // transform 移动不触发布局，配合 CSS will-change 保持拖动流畅
-      ring.style.transform = 'translate3d(' + e.clientX + 'px,' + e.clientY + 'px,0) translate(-50%, -50%)';
-    });
+    // 笔刷尺寸光标环由 brush.js 实现（.brush-ring，直径恒等于笔刷显示像素，
+    // 含擦除/修补配色与平移隐藏），此处不再单独维护 #brush-cursor
 
     // 工具切换
     var btns = document.querySelectorAll('#tool-group button');
@@ -286,7 +296,6 @@ window.App = (function () {
     $('brush-size').addEventListener('input', function () {
       State.brushSize = +this.value;
       $('brush-size-val').textContent = this.value + 'px';
-      if (syncBrushRing) syncBrushRing();
     });
 
     $('btn-undo').addEventListener('click', undoMask);
@@ -326,7 +335,6 @@ window.App = (function () {
         State.brushSize = size;
         $('brush-size').value = size;
         $('brush-size-val').textContent = size + 'px';
-        if (syncBrushRing) syncBrushRing();
         e.preventDefault();
       }
     });

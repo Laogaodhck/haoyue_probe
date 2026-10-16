@@ -398,6 +398,20 @@ button:disabled, .btn-col button:disabled, .btn-row button:disabled {
 /* 缩放/平移模式：光标切换为抓手，隐藏笔刷圈 */
 #matte-view.panning { cursor: grab; }
 #matte-view.panning:active { cursor: grabbing; }
+/* 画笔尺寸光标环：实时跟随指针预览笔刷直径（修补=白环 / 擦除=红环 / 双指捏合=半透明） */
+.brush-ring {
+  position: fixed;
+  border: 1.5px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 500;
+  transform: translate(-50%, -50%);
+  display: none;
+  will-change: left, top, width, height;
+}
+.brush-ring.erase { border-color: var(--danger); }
+.brush-ring.pinch { opacity: 0.35; }
 
 /* 抠图换底 · 缩放工具栏 */
 .zoom-bar {
@@ -425,20 +439,6 @@ button:disabled, .btn-col button:disabled, .btn-row button:disabled {
   text-align: center;
   font-size: 12px;
   color: var(--text-dim);
-}
-
-/* 笔刷圆圈光标：跟随鼠标，直径=笔刷大小×2 */
-#brush-cursor {
-  position: fixed;
-  left: 0;
-  top: 0;
-  border: 1.5px solid rgba(255, 255, 255, .95);
-  border-radius: 50%;
-  pointer-events: none;
-  transform: translate3d(-100px, -100px, 0) translate(-50%, -50%);
-  will-change: transform;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .35);
-  z-index: 300;
 }
 
 .crop-stack { position: relative; line-height: 0; }

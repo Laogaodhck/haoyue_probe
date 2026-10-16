@@ -176,18 +176,30 @@
       if (!sheetPages) { toast('请先批量导入照片', true); return; }
     }
     var name = sheetFiles.length ? (sheetFiles[0].name || '照片') : (State.sourceName || '照片');
-    var multi = sheetPages.pages.length > 1;
+    var pages = sheetPages.pages;
+    var multi = pages.length > 1;
     try {
-      for (var i = 0; i < sheetPages.pages.length; i++) {
-        var blob = await new Promise(function (r) { sheetPages.pages[i].canvas.toBlob(r, 'image/png'); });
+      // 每页编码为 300DPI PNG；多页时打包为单个 ZIP 只弹一次保存对话框，
+      // 避免逐页下载在 Electron 里连续弹出多个保存窗口
+      var zipFiles = [];
+      for (var i = 0; i < pages.length; i++) {
+        var blob = await new Promise(function (r) { pages[i].canvas.toBlob(r, 'image/png'); });
         var buf = window.DpiUtil.setPngDpi(await blob.arrayBuffer(), 300);
         var fname = name + '_排版_' + sheetPages.paper.name
-          + (multi ? '_第' + (i + 1) + '页共' + sheetPages.pages.length + '页' : '_' + sheetPages.pages[i].count + '张')
+          + (multi ? '_第' + (i + 1) + '页共' + pages.length + '页' : '_' + pages[i].count + '张')
           + '.png';
-        download(new Blob([buf], { type: 'image/png' }), fname);
-        if (multi) await new Promise(function (r) { setTimeout(r, 350); }); // 间隔避免下载拦截
+        if (multi) {
+          zipFiles.push({ name: fname, data: new Uint8Array(buf) });
+        } else {
+          download(new Blob([buf], { type: 'image/png' }), fname);
+        }
       }
-      toast('排版图已保存（' + sheetPages.total + ' 张 · ' + sheetPages.pages.length + ' 版 · 300DPI）');
+      if (multi) {
+        var zip = await window.ZipUtil.store(zipFiles);
+        download(zip, name + '_排版_' + sheetPages.paper.name + '_' + pages.length + '页.zip');
+      }
+      toast('排版图已保存（' + sheetPages.total + ' 张 · ' + pages.length + ' 版 · 300DPI'
+        + (multi ? ' · ZIP 压缩包' : '') + '）');
     } catch (e) {
       console.error(e);
       toast('导出失败：' + e.message, true);

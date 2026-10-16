@@ -186,9 +186,23 @@ withServer(PORT, async () => {
   doc.getElementById('batch-open-rename').click();
   assert(doc.getElementById('batch-rename').hidden === false, '点击后进入重命名面板');
 
+  // 未选文件夹时「刷新预览」必须有提示反馈（修复前静默无反应）
+  doc.getElementById('btn-batch-refresh').click();
+  assert(doc.getElementById('toast').className.indexOf('show') >= 0, '未选文件夹时刷新预览弹出提示');
+  assert(doc.getElementById('toast').textContent.indexOf('请先选择文件夹') >= 0, '提示内容为「请先选择文件夹」');
+
   doc.getElementById('batch-pick').click();
   await flush();
   assert(doc.getElementById('batch-folder').textContent.indexOf('测试文件夹') >= 0, '文件夹已选择并显示名称');
+
+  // 默认类型=全部：图片文件也要加载缩略图，文档保持占位图
+  // （修复前全部类型下预览列全是占位图且点击无任何反馈）
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  await flush(60);
+  const rowByName = (n) => Array.from(doc.querySelectorAll('#batch-table tbody tr'))
+    .find((tr) => tr.cells[2].textContent === n);
+  assert(rowByName('a.jpg').cells[1].querySelector('img').getAttribute('src') !== BLANK, '全部类型下照片行缩略图已加载');
+  assert(rowByName('readme.txt').cells[1].querySelector('img').getAttribute('src') === BLANK, '全部类型下文档行保持占位图');
 
   doc.getElementById('batch-base').value = '照片';
   doc.getElementById('batch-base').dispatchEvent(new win.Event('input'));
@@ -290,6 +304,7 @@ withServer(PORT, async () => {
   thumbImg.setAttribute('src', 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
   thumbImg.click();
   assert(box.hidden === true, '占位图点击不打开预览');
+  assert(doc.getElementById('toast').className.indexOf('show') >= 0 && doc.getElementById('toast').textContent.indexOf('无法预览') >= 0, '占位图点击给出无法预览提示');
   assert(phImg !== null, '表格行查找正常');
 
   /* ---------- 4. 清空：状态重置 + 缩略图缓存释放 ---------- */

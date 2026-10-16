@@ -199,6 +199,7 @@
 
   // 缩略图占位（无 src 时由 CSS 背景显示占位图形）
   var BLANK_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  var IMG_EXTS = { jpg: 1, jpeg: 1, png: 1, bmp: 1, gif: 1, webp: 1, tif: 1, tiff: 1, ico: 1, svg: 1, heic: 1 };
 
   function releaseThumbs() {
     if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
@@ -207,11 +208,13 @@
     thumbUrls = [];
   }
 
-  // 照片类型：异步加载缩略图（objectURL 直接引用原文件，加载失败静默保持占位图）
+  // 异步加载缩略图（objectURL 直接引用原文件）：图片后缀才尝试，失败静默保持占位。
+  // 各过滤类型（全部/照片/自定义）下图片文件都加载，文档类型全是占位图。
   function loadThumbs() {
     if (typeof URL === 'undefined' || !URL.createObjectURL) return;
     plan.forEach(function (row) {
       if (!row.handle || !row.handle.getFile) return;
+      if (!IMG_EXTS[(row.ext || '').toLowerCase().replace(/^\./, '')]) return;
       row.handle.getFile().then(function (f) {
         if (!f) return;
         var url = URL.createObjectURL(f);
@@ -278,7 +281,7 @@
 
       tbody.appendChild(tr);
     });
-    if ($('batch-kind').value === '照片') loadThumbs();
+    loadThumbs();
     if (lastCustomFocus) { // 恢复输入焦点，避免重渲染打断连续输入
       var target = null;
       tbody.querySelectorAll('input.rename-input').forEach(function (el) {
@@ -414,7 +417,10 @@
       $(id).addEventListener('input', function () { if (dirHandle) scheduleRefresh(); });
     });
     $('batch-sep').addEventListener('change', function () { if (dirHandle) refreshPreview(); });
-    $('btn-batch-refresh').addEventListener('click', function () { if (dirHandle) refreshPreview(); });
+    $('btn-batch-refresh').addEventListener('click', function () {
+      if (!dirHandle) { toast('请先选择文件夹', true); return; }
+      refreshPreview();
+    });
     $('btn-batch-clear').addEventListener('click', clearAll);
     // 新文件名输入框：自定义名（留空=按规则自动编号），防抖后仅用缓存重建计划
     $('batch-table').querySelector('tbody').addEventListener('input', function (e) {
@@ -424,12 +430,12 @@
       lastCustomFocus = inp.dataset.old;
       schedulePlanRefresh();
     });
-    // 点击缩略图放大预览（占位图不响应）；lightbox 点击任意处或 Esc 关闭
+    // 点击缩略图放大预览（占位图给出提示）；lightbox 点击任意处或 Esc 关闭
     $('batch-table').querySelector('tbody').addEventListener('click', function (e) {
       var img = e.target;
       if (!img.classList || !img.classList.contains('batch-thumb')) return;
       var src = img.getAttribute('src');
-      if (!src || src === BLANK_SRC) return;
+      if (!src || src === BLANK_SRC) { toast('该文件无法预览（缩略图不可用）', true); return; }
       openLightbox(src);
     });
     $('thumb-lightbox').addEventListener('click', closeLightbox);

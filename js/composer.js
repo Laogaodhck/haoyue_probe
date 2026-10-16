@@ -8,52 +8,116 @@
 
 window.Composer = (function () {
 
-  /* 复用的临时画布：笔刷拖动时每帧合成，新建大画布是卡顿主因 */
-  var _tmpA = null, _tmpFG = null;
+  /* ================= 合成 ================= */
+  /* 笔刷拖拽每帧合成的开销大头是 ①画布重分配 ②大图高质量缩放采样。
+     这里把「工作图层」与「缩放蒙版」整幅缓存（变换/蒙版不变时直接命中），
+     拖拽期间每帧只做小块 1:1 拷贝与脏区蒙版增量重绘，临时画布零重分配。 */
+
+  var _ctxMap = new WeakMap();       // canvas → ctx（避免每帧重复 getContext）
+  function ctxOf(c) {
+    var x = _ctxMap.get(c);
+    if (!x) { x = c.getContext('2d'); _ctxMap.set(c, x); }
+    return x;
+  }
+
   function ensureSize(c, w, h) {
     if (!c) c = document.createElement('canvas');
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     return c;
   }
 
-  function compositeInto(ctx, outW, outH, st) {
+  /* 工作图层缓存：work 按 tf 绘制到 outW×outH（透明底，不含底色 → 换底色无需失效）。
+     key 含变换与尺寸：换图 / 缩放 / 平移 / 目标尺寸变化自动重建。 */
+  var _layerC = null, _layerWork = null, _layerKey = '';
+  function workLayer(st, outW, outH, tf) {
+    var key = outW + 'x' + outH + '|' + tf.scale + '|' + tf.tx + '|' + tf.ty;
+    if (_layerC && _layerWork === st.workCanvas && _layerKey === key) return _layerC;
+    var c = ensureSize(_layerC, outW, outH);
+    _layerC = c; _layerWork = st.workCanvas; _layerKey = key;
+    var x = ctxOf(c);
+    x.clearRect(0, 0, outW, outH);
+    x.imageSmoothingEnabled = true;
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(st.workCanvas, tf.tx, tf.ty,
+      st.workCanvas.width * tf.scale, st.workCanvas.height * tf.scale);
+    return c;
+  }
+
+  /* 缩放蒙版缓存：mask 按 tf 绘制到 outW×outH。
+     脏区拖拽时只增量重绘对应小块（源侧外扩 2/scale+1px，覆盖缩放采样邻域与
+     源矩形边缘滤波效应），替代每帧整幅高分辨率蒙版的缩放采样。
+     key 含 _maskRev：undo / 重置蒙版等整幅重写后自动全量重建；
+     整幅渲染（region=null）时也全量重绘，兜底保证缓存与蒙版一致。 */
+  var _smC = null, _smMask = null, _smKey = '';
+  function scaledMask(st, outW, outH, tf, region) {
+    var key = outW + 'x' + outH + '|' + tf.scale + '|' + tf.tx + '|' + tf.ty
+      + '|r' + (st._maskRev || 0);
+    if (!(_smC && _smMask === st.maskCanvas && _smKey === key)) {
+      var c0 = ensureSize(_smC, outW, outH);
+      _smC = c0; _smMask = st.maskCanvas; _smKey = key;
+      var x0 = ctxOf(c0);
+      x0.clearRect(0, 0, outW, outH);
+      x0.imageSmoothingEnabled = true;
+      x0.imageSmoothingQuality = 'high';
+      x0.drawImage(st.maskCanvas, tf.tx, tf.ty,
+        st.maskCanvas.width * tf.scale, st.maskCanvas.height * tf.scale);
+      return c0;
+    }
+    var x = ctxOf(_smC);
+    if (region) {
+      var pad = 2 / tf.scale + 1;
+      var sx = (region.x - tf.tx) / tf.scale - pad;
+      var sy = (region.y - tf.ty) / tf.scale - pad;
+      var sw = region.w / tf.scale + 2 * pad;
+      var sh = region.h / tf.scale + 2 * pad;
+      x.clearRect(tf.tx + sx * tf.scale, tf.ty + sy * tf.scale, sw * tf.scale, sh * tf.scale);
+      x.imageSmoothingEnabled = true;
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(st.maskCanvas, sx, sy, sw, sh,
+        tf.tx + sx * tf.scale, tf.ty + sy * tf.scale, sw * tf.scale, sh * tf.scale);
+    } else {
+      x.clearRect(0, 0, outW, outH);
+      x.imageSmoothingEnabled = true;
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(st.maskCanvas, tf.tx, tf.ty,
+        st.maskCanvas.width * tf.scale, st.maskCanvas.height * tf.scale);
+    }
+    return _smC;
+  }
+
+  /* 前景临时画布（整幅尺寸，拖拽期间零重分配） */
+  var _fgC = null;
+
+  /* dirty：可选，输出坐标 {x,y,w,h}——只重绘该矩形（笔刷拖拽时局部合成，避免全画布开销） */
+  function compositeInto(ctx, outW, outH, st, dirty) {
     var work = st.workCanvas;
     var mask = st.maskCanvas;
     var tf = st.transform;
     if (!work || !mask || !tf) return;
 
-    var scale = tf.scale, tx = tf.tx, ty = tf.ty;
-    var dw = work.width * scale;
-    var dh = work.height * scale;
+    var vx = dirty ? dirty.x : 0, vy = dirty ? dirty.y : 0;
+    var cw = dirty ? dirty.w : outW, ch = dirty ? dirty.h : outH;
 
+    /* 图层缓存（笔画期间变换不变 → 每帧仅小块拷贝） */
+    var layer = workLayer(st, outW, outH, tf);
+    var sm = scaledMask(st, outW, outH, tf, dirty);
+
+    /* 前景 = 工作图层 ∧ 蒙版（仅脏区）。1:1 拷贝无插值，与按 tf 直绘逐像素一致 */
+    var fg = ensureSize(_fgC, outW, outH);
+    _fgC = fg;
+    var fx = ctxOf(fg);
+    fx.clearRect(vx, vy, cw, ch);
+    fx.drawImage(layer, vx, vy, cw, ch, vx, vy, cw, ch);
+    fx.globalCompositeOperation = 'destination-in';
+    fx.drawImage(sm, vx, vy, cw, ch, vx, vy, cw, ch);
+    fx.globalCompositeOperation = 'source-over';
+
+    /* 目标画布 = 底色 + 前景 */
     ctx.save();
-    ctx.clearRect(0, 0, outW, outH);
-
-    // 1. 纯色底
+    ctx.clearRect(vx, vy, cw, ch);
     ctx.fillStyle = st.bg || '#FFFFFF';
-    ctx.fillRect(0, 0, outW, outH);
-
-    // 2. 遮罩（保留发丝的连续 alpha）
-    var a = ensureSize(_tmpA, outW, outH);
-    _tmpA = a;
-    var actx = a.getContext('2d');
-    actx.clearRect(0, 0, outW, outH);
-    actx.drawImage(mask, tx, ty, dw, dh);
-
-    // 3. 前景 = 原图 ∧ 遮罩
-    var fg = ensureSize(_tmpFG, outW, outH);
-    _tmpFG = fg;
-    var fctx = fg.getContext('2d');
-    fctx.clearRect(0, 0, outW, outH);
-    fctx.imageSmoothingEnabled = true;
-    fctx.imageSmoothingQuality = 'high';
-    fctx.drawImage(work, tx, ty, dw, dh);
-    fctx.globalCompositeOperation = 'destination-in';
-    fctx.drawImage(a, 0, 0);
-    fctx.globalCompositeOperation = 'source-over';
-
-    // 4. 落到目标画布
-    ctx.drawImage(fg, 0, 0);
+    ctx.fillRect(vx, vy, cw, ch);
+    ctx.drawImage(fg, vx, vy, cw, ch, vx, vy, cw, ch);
     ctx.restore();
   }
 
